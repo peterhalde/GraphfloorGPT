@@ -1,0 +1,14 @@
+node_modules/
+*.log
+.env
+.env.local
+.env.production
+uploads/
+dist/
+build/
+.DS_Store
+*.tmp
+*.temp
+debug_*.js
+force_*.js
+test_*.html

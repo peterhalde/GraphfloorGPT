@@ -158,19 +158,43 @@ Return ONLY a valid JSON object with this exact structure:
     const prompt = `
 You are a Neo4j Cypher query translator. Convert the following natural language query into a valid Cypher query.
 
-The graph database contains:
-- Nodes with labels: Person, Equipment, Process, Concept, Material, Organization, Location
-- Common relationships: USES, CONTROLS, PRODUCES, PART_OF, MANAGES, CONTAINS, REQUIRES, AFFECTS, RELATED_TO
-- Node properties: name, description, type, confidence
-- Relationship properties: description, confidence
+IMPORTANT CONTEXT:
+- Nodes have BOTH dynamic labels AND a type property
+- Node labels are based on their type (e.g., :recipe, :entity, :process, :ingredient, :dish)
+- Node properties ALWAYS include: id, name, description, type
+- The 'type' property matches the label (lowercase)
+- Relationship types: USES, CONTROLS, PRODUCES, PART_OF, MANAGES, CONTAINS, REQUIRES, AFFECTS, RELATED_TO
+
+QUERY PATTERNS (USE THESE):
+1. Find all nodes: MATCH (n) RETURN n, labels(n) as labels
+2. Find nodes by type using label: MATCH (n:ingredient) RETURN n
+3. Find nodes by type using property: MATCH (n) WHERE n.type = 'ingredient' RETURN n
+4. Find specific node by name: MATCH (n) WHERE toLower(n.name) CONTAINS toLower('search_term') RETURN n
+5. Find related nodes: MATCH (n)-[r]-(m) WHERE toLower(n.name) CONTAINS toLower('node_name') RETURN n, r, m
+6. Find ingredients for a dish: MATCH (dish:recipe)-[r]-(ingredient:entity) WHERE toLower(dish.name) CONTAINS toLower('dish_name') RETURN ingredient
+7. Count nodes by type: MATCH (n) RETURN n.type as nodeType, count(n) as nodeCount ORDER BY nodeCount DESC
+8. Show all with details: MATCH (n) RETURN n.name as name, n.type as type, n.description as description LIMIT 50
 
 Natural language query: "${query}"
 
+Examples:
+- "Which nodes do you have" → MATCH (n) RETURN n.name as name, n.type as type, n.description as description LIMIT 50
+- "What nodes exist" → MATCH (n) RETURN n.name as name, n.type as type, count(*) as count ORDER BY n.type
+- "Show me all nodes" → MATCH (n) RETURN n
+- "What dishes do you know" → MATCH (n:dish) RETURN n
+- "What ingredients do you know" → MATCH (n:ingredient) RETURN n
+- "Show me Flammkuchen" → MATCH (n) WHERE toLower(n.name) CONTAINS 'flammkuchen' RETURN n
+- "What ingredients are needed for Flammkuchen" → MATCH (dish) WHERE toLower(dish.name) CONTAINS 'flammkuchen' MATCH (dish)-[r]-(ingredient) WHERE ingredient.type = 'ingredient' OR ingredient.type = 'entity' RETURN ingredient
+- "Show all recipes" → MATCH (n:recipe) RETURN n
+- "List all ingredients" → MATCH (n:ingredient) RETURN n
+
+IMPORTANT: If the query asks about "nodes", return a comprehensive view with name, type, and description.
+
 Return ONLY a valid JSON object with this structure:
 {
-  "graphQuery": "MATCH (n) WHERE n.name CONTAINS 'example' RETURN n LIMIT 10",
+  "graphQuery": "Your Cypher query here",
   "queryType": "search|analysis|relationship",
-  "explanation": "This query searches for nodes containing the term 'example'"
+  "explanation": "Brief explanation of what the query does"
 }`;
 
     try {
@@ -188,7 +212,15 @@ Return ONLY a valid JSON object with this structure:
         throw new Error('Unexpected response type from Claude');
       }
 
-      const result = JSON.parse(content.text);
+      // Clean the response - remove markdown code blocks if present
+      let cleanedText = content.text.trim();
+      if (cleanedText.startsWith('```json')) {
+        cleanedText = cleanedText.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+      } else if (cleanedText.startsWith('```')) {
+        cleanedText = cleanedText.replace(/^```\s*/, '').replace(/\s*```$/, '');
+      }
+
+      const result = JSON.parse(cleanedText);
       
       return {
         graphQuery: String(result.graphQuery || '').trim(),
@@ -241,7 +273,15 @@ Return ONLY a valid JSON object:
         throw new Error('Unexpected response type from Claude');
       }
 
-      const result = JSON.parse(content.text);
+      // Clean the response - remove markdown code blocks if present
+      let cleanedText = content.text.trim();
+      if (cleanedText.startsWith('```json')) {
+        cleanedText = cleanedText.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+      } else if (cleanedText.startsWith('```')) {
+        cleanedText = cleanedText.replace(/^```\s*/, '').replace(/\s*```$/, '');
+      }
+
+      const result = JSON.parse(cleanedText);
       
       return {
         similarityScore: Math.max(0, Math.min(1, Number(result.similarityScore) || 0)),

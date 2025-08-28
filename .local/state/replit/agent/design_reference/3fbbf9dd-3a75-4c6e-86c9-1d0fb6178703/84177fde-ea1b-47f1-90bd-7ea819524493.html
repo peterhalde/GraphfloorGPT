@@ -1,0 +1,1007 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GraphfloorGPT - Knowledge Graph Management</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+    tailwind.config = {
+        theme: {
+            extend: {
+                colors: {
+                    'carbon-blue': '#0f62fe',
+                    'carbon-gray-80': '#393939',
+                    'carbon-gray-70': '#525252',
+                    'carbon-gray-60': '#6f6f6f',
+                    'carbon-gray-50': '#8d8d8d',
+                    'carbon-gray-30': '#c6c6c6',
+                    'carbon-gray-20': '#e0e0e0',
+                    'carbon-gray-10': '#f4f4f4',
+                    'carbon-green': '#24a148',
+                    'carbon-yellow': '#f1c21b',
+                    'carbon-red': '#da1e28'
+                },
+                fontFamily: {
+                    'ibm': ['IBM Plex Sans', 'sans-serif'],
+                    'ibm-mono': ['IBM Plex Mono', 'monospace']
+                }
+            }
+        }
+    };
+    </script>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+</head>
+<body class="font-ibm bg-carbon-gray-10 text-gray-900">
+    <!-- @COMPONENT: MainLayout -->
+    <div class="min-h-screen flex">
+        <!-- @COMPONENT: Sidebar -->
+        <nav class="w-64 bg-carbon-gray-80 text-white flex-shrink-0">
+            <div class="p-6">
+                <div class="flex items-center space-x-3 mb-8">
+                    <div class="w-10 h-10 bg-carbon-blue rounded-lg flex items-center justify-center">
+                        <i class="fas fa-project-diagram text-white text-xl"></i>
+                    </div>
+                    <div>
+                        <h1 class="text-xl font-semibold">GraphfloorGPT</h1>
+                        <p class="text-carbon-gray-30 text-sm">Knowledge Graph AI</p>
+                    </div>
+                </div>
+                
+                <ul class="space-y-2">
+                    <li>
+                        <a href="#upload" data-tab="upload" class="nav-link flex items-center space-x-3 px-4 py-3 rounded-lg bg-carbon-blue text-white">
+                            <i class="fas fa-upload w-5"></i>
+                            <span>PDF Upload</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="#nodes" data-tab="nodes" class="nav-link flex items-center space-x-3 px-4 py-3 rounded-lg text-carbon-gray-30 hover:bg-carbon-gray-70 hover:text-white transition-colors">
+                            <i class="fas fa-sitemap w-5"></i>
+                            <span>Node Management</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="#dedup" data-tab="dedup" class="nav-link flex items-center space-x-3 px-4 py-3 rounded-lg text-carbon-gray-30 hover:bg-carbon-gray-70 hover:text-white transition-colors">
+                            <i class="fas fa-compress-arrows-alt w-5"></i>
+                            <span>Deduplication</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="#graph" data-tab="graph" class="nav-link flex items-center space-x-3 px-4 py-3 rounded-lg text-carbon-gray-30 hover:bg-carbon-gray-70 hover:text-white transition-colors">
+                            <i class="fas fa-project-diagram w-5"></i>
+                            <span>Graph View</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="#chat" data-tab="chat" class="nav-link flex items-center space-x-3 px-4 py-3 rounded-lg text-carbon-gray-30 hover:bg-carbon-gray-70 hover:text-white transition-colors">
+                            <i class="fas fa-comments w-5"></i>
+                            <span>Query Chat</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="#dev" data-tab="dev" class="nav-link flex items-center space-x-3 px-4 py-3 rounded-lg text-carbon-gray-30 hover:bg-carbon-gray-70 hover:text-white transition-colors">
+                            <i class="fas fa-code w-5"></i>
+                            <span>Developer Console</span>
+                        </a>
+                    </li>
+                </ul>
+            </div>
+            
+            <div class="mt-auto p-6 border-t border-carbon-gray-70">
+                <div class="flex items-center space-x-3">
+                    <div class="w-8 h-8 bg-carbon-green rounded-full flex items-center justify-center">
+                        <i class="fas fa-check text-white text-sm"></i>
+                    </div>
+                    <div class="text-sm">
+                        <p class="text-white">Langfuse v2 Connected</p>
+                        <p class="text-carbon-gray-30">Neo4j Ready</p>
+                    </div>
+                </div>
+            </div>
+        </nav>
+        <!-- @END_COMPONENT: Sidebar -->
+
+        <!-- @COMPONENT: MainContent -->
+        <main class="flex-1 flex flex-col">
+            <!-- @COMPONENT: Header -->
+            <header class="bg-white border-b border-carbon-gray-20 px-8 py-4">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <h2 id="page-title" class="text-2xl font-semibold text-gray-900">PDF Upload & Processing</h2>
+                        <p id="page-subtitle" class="text-carbon-gray-60 mt-1">Upload PDFs to extract and convert into knowledge graph nodes</p>
+                    </div>
+                    <div class="flex items-center space-x-4">
+                        <div class="flex items-center space-x-2 text-sm text-carbon-gray-60">
+                            <i class="fas fa-database"></i>
+                            <span data-bind="stats.totalNodes">1,247 nodes</span>
+                        </div>
+                        <div class="flex items-center space-x-2 text-sm text-carbon-gray-60">
+                            <i class="fas fa-link"></i>
+                            <span data-bind="stats.totalRelations">3,891 relations</span>
+                        </div>
+                    </div>
+                </div>
+            </header>
+            <!-- @END_COMPONENT: Header -->
+
+            <!-- @COMPONENT: ContentArea -->
+            <div class="flex-1 p-8 overflow-auto">
+                
+                <!-- @COMPONENT: UploadTab -->
+                <div id="upload-tab" class="tab-content">
+                    <div class="max-w-4xl mx-auto">
+                        <!-- Step Progress -->
+                        <div class="mb-8">
+                            <div class="flex items-center justify-between relative">
+                                <div class="flex items-center">
+                                    <div class="w-8 h-8 bg-carbon-blue text-white rounded-full flex items-center justify-center text-sm font-medium">1</div>
+                                    <span class="ml-3 text-sm font-medium text-gray-900">Upload PDF</span>
+                                </div>
+                                <div class="flex-1 mx-4 h-px bg-carbon-gray-20"></div>
+                                <div class="flex items-center">
+                                    <div class="w-8 h-8 bg-carbon-gray-20 text-carbon-gray-60 rounded-full flex items-center justify-center text-sm font-medium">2</div>
+                                    <span class="ml-3 text-sm font-medium text-carbon-gray-60">Extract Text</span>
+                                </div>
+                                <div class="flex-1 mx-4 h-px bg-carbon-gray-20"></div>
+                                <div class="flex items-center">
+                                    <div class="w-8 h-8 bg-carbon-gray-20 text-carbon-gray-60 rounded-full flex items-center justify-center text-sm font-medium">3</div>
+                                    <span class="ml-3 text-sm font-medium text-carbon-gray-60">Generate Nodes</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Upload Area -->
+                        <div class="bg-white rounded-lg border-2 border-dashed border-carbon-gray-30 p-8 text-center hover:border-carbon-blue transition-colors">
+                            <div class="max-w-md mx-auto">
+                                <i class="fas fa-file-pdf text-4xl text-carbon-gray-50 mb-4"></i>
+                                <h3 class="text-lg font-medium text-gray-900 mb-2">Upload PDF Documents</h3>
+                                <p class="text-carbon-gray-60 mb-6">Drag and drop your PDF files here, or click to browse</p>
+                                <button data-event="click:handleFileUpload" class="bg-carbon-blue text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition-colors">
+                                    <i class="fas fa-upload mr-2"></i>
+                                    Choose Files
+                                </button>
+                                <input type="file" data-mock="true" class="hidden" accept=".pdf" multiple>
+                            </div>
+                        </div>
+
+                        <!-- Recently Uploaded Files -->
+                        <div class="mt-8">
+                            <h3 class="text-lg font-medium text-gray-900 mb-4">Recent Uploads</h3>
+                            <div class="bg-white rounded-lg border border-carbon-gray-20">
+                                <!-- @MAP: recentFiles.map(file => ( -->
+                                <div class="flex items-center justify-between p-4 border-b border-carbon-gray-20 last:border-b-0">
+                                    <div class="flex items-center space-x-4">
+                                        <div class="w-10 h-10 bg-red-100 rounded-lg flex items-center justify-center">
+                                            <i class="fas fa-file-pdf text-red-600"></i>
+                                        </div>
+                                        <div>
+                                            <p class="font-medium text-gray-900" data-mock="true">Manufacturing_Process_Guide.pdf</p>
+                                            <p class="text-sm text-carbon-gray-60" data-mock="true">2.4 MB • Uploaded 5 minutes ago</p>
+                                        </div>
+                                    </div>
+                                    <div class="flex items-center space-x-3">
+                                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-carbon-green bg-opacity-10 text-carbon-green">
+                                            <i class="fas fa-check mr-1"></i>
+                                            Processed
+                                        </span>
+                                        <button class="text-carbon-gray-60 hover:text-gray-900">
+                                            <i class="fas fa-eye"></i>
+                                        </button>
+                                        <button class="text-carbon-gray-60 hover:text-carbon-red">
+                                            <i class="fas fa-trash"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                                <!-- @END_MAP )) -->
+                                <div class="flex items-center justify-between p-4 border-b border-carbon-gray-20 last:border-b-0">
+                                    <div class="flex items-center space-x-4">
+                                        <div class="w-10 h-10 bg-red-100 rounded-lg flex items-center justify-center">
+                                            <i class="fas fa-file-pdf text-red-600"></i>
+                                        </div>
+                                        <div>
+                                            <p class="font-medium text-gray-900" data-mock="true">Quality_Control_Manual.pdf</p>
+                                            <p class="text-sm text-carbon-gray-60" data-mock="true">1.8 MB • Processing...</p>
+                                        </div>
+                                    </div>
+                                    <div class="flex items-center space-x-3">
+                                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-carbon-yellow bg-opacity-10 text-carbon-yellow">
+                                            <i class="fas fa-sync fa-spin mr-1"></i>
+                                            Processing
+                                        </span>
+                                        <button class="text-carbon-gray-60 hover:text-carbon-red">
+                                            <i class="fas fa-trash"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <!-- @END_COMPONENT: UploadTab -->
+
+                <!-- @COMPONENT: NodesTab -->
+                <div id="nodes-tab" class="tab-content hidden">
+                    <div class="max-w-6xl mx-auto">
+                        <div class="flex justify-between items-center mb-6">
+                            <div>
+                                <h3 class="text-lg font-medium text-gray-900">Node & Relation Management</h3>
+                                <p class="text-carbon-gray-60">Review and approve suggested nodes and relations from your documents</p>
+                            </div>
+                            <div class="flex space-x-3">
+                                <button class="bg-white border border-carbon-gray-30 text-gray-700 px-4 py-2 rounded-lg hover:bg-carbon-gray-10">
+                                    <i class="fas fa-filter mr-2"></i>
+                                    Filter
+                                </button>
+                                <button class="bg-carbon-blue text-white px-4 py-2 rounded-lg hover:bg-blue-700">
+                                    <i class="fas fa-plus mr-2"></i>
+                                    Add Manual Node
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Pending Approval Section -->
+                        <div class="bg-white rounded-lg border border-carbon-gray-20 mb-6">
+                            <div class="border-b border-carbon-gray-20 p-4">
+                                <h4 class="font-medium text-gray-900 flex items-center">
+                                    <i class="fas fa-clock text-carbon-yellow mr-2"></i>
+                                    Pending Approval (12)
+                                </h4>
+                            </div>
+                            <div class="p-4 space-y-4">
+                                <!-- @MAP: pendingNodes.map(node => ( -->
+                                <div class="border border-carbon-gray-20 rounded-lg p-4 hover:bg-carbon-gray-10 transition-colors">
+                                    <div class="flex items-start justify-between">
+                                        <div class="flex-1">
+                                            <div class="flex items-center space-x-3 mb-2">
+                                                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                                                    Node
+                                                </span>
+                                                <h5 class="font-medium text-gray-900" data-mock="true">Manufacturing Equipment</h5>
+                                            </div>
+                                            <p class="text-carbon-gray-60 text-sm mb-3" data-mock="true">Industrial machinery and tools used in the production process including CNC machines, conveyor systems, and quality control instruments.</p>
+                                            <div class="flex items-center space-x-4 text-sm text-carbon-gray-60">
+                                                <span>Source: Manufacturing_Process_Guide.pdf</span>
+                                                <span>Confidence: 89%</span>
+                                            </div>
+                                        </div>
+                                        <div class="flex space-x-2 ml-4">
+                                            <button class="bg-carbon-green text-white px-3 py-1 rounded text-sm hover:bg-green-600" data-event="click:approveNode">
+                                                <i class="fas fa-check mr-1"></i>
+                                                Approve
+                                            </button>
+                                            <button class="bg-carbon-red text-white px-3 py-1 rounded text-sm hover:bg-red-600" data-event="click:rejectNode">
+                                                <i class="fas fa-times mr-1"></i>
+                                                Reject
+                                            </button>
+                                            <button class="bg-white border border-carbon-gray-30 text-gray-700 px-3 py-1 rounded text-sm hover:bg-carbon-gray-10" data-event="click:editNode">
+                                                <i class="fas fa-edit mr-1"></i>
+                                                Edit
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                                <!-- @END_MAP )) -->
+                                
+                                <div class="border border-carbon-gray-20 rounded-lg p-4 hover:bg-carbon-gray-10 transition-colors">
+                                    <div class="flex items-start justify-between">
+                                        <div class="flex-1">
+                                            <div class="flex items-center space-x-3 mb-2">
+                                                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                                                    Relation
+                                                </span>
+                                                <h5 class="font-medium text-gray-900" data-mock="true">requires → Quality Control</h5>
+                                            </div>
+                                            <p class="text-carbon-gray-60 text-sm mb-3" data-mock="true">Manufacturing Equipment requires Quality Control procedures to ensure product standards and safety compliance.</p>
+                                            <div class="flex items-center space-x-4 text-sm text-carbon-gray-60">
+                                                <span>Source: Quality_Control_Manual.pdf</span>
+                                                <span>Confidence: 95%</span>
+                                            </div>
+                                        </div>
+                                        <div class="flex space-x-2 ml-4">
+                                            <button class="bg-carbon-green text-white px-3 py-1 rounded text-sm hover:bg-green-600">
+                                                <i class="fas fa-check mr-1"></i>
+                                                Approve
+                                            </button>
+                                            <button class="bg-carbon-red text-white px-3 py-1 rounded text-sm hover:bg-red-600">
+                                                <i class="fas fa-times mr-1"></i>
+                                                Reject
+                                            </button>
+                                            <button class="bg-white border border-carbon-gray-30 text-gray-700 px-3 py-1 rounded text-sm hover:bg-carbon-gray-10">
+                                                <i class="fas fa-edit mr-1"></i>
+                                                Edit
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Approved Nodes Section -->
+                        <div class="bg-white rounded-lg border border-carbon-gray-20">
+                            <div class="border-b border-carbon-gray-20 p-4">
+                                <h4 class="font-medium text-gray-900 flex items-center">
+                                    <i class="fas fa-check-circle text-carbon-green mr-2"></i>
+                                    Approved Nodes & Relations (1,247)
+                                </h4>
+                            </div>
+                            <div class="p-4">
+                                <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                                    <!-- @MAP: approvedNodes.map(node => ( -->
+                                    <div class="border border-carbon-gray-20 rounded-lg p-3">
+                                        <div class="flex items-center justify-between">
+                                            <div>
+                                                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
+                                                    Node
+                                                </span>
+                                                <h6 class="font-medium text-gray-900 mt-1" data-mock="true">Production Line</h6>
+                                                <p class="text-xs text-carbon-gray-60 mt-1" data-mock="true">Assembly sequence for manufacturing products</p>
+                                            </div>
+                                            <button class="text-carbon-gray-60 hover:text-gray-900">
+                                                <i class="fas fa-external-link-alt"></i>
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <!-- @END_MAP )) -->
+                                    
+                                    <div class="border border-carbon-gray-20 rounded-lg p-3">
+                                        <div class="flex items-center justify-between">
+                                            <div>
+                                                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">
+                                                    Relation
+                                                </span>
+                                                <h6 class="font-medium text-gray-900 mt-1" data-mock="true">operates_on → Raw Materials</h6>
+                                                <p class="text-xs text-carbon-gray-60 mt-1" data-mock="true">Production line processes raw materials</p>
+                                            </div>
+                                            <button class="text-carbon-gray-60 hover:text-gray-900">
+                                                <i class="fas fa-external-link-alt"></i>
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <div class="mt-4 text-center">
+                                    <button class="text-carbon-blue hover:text-blue-700">
+                                        Load more nodes and relations
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <!-- @END_COMPONENT: NodesTab -->
+
+                <!-- @COMPONENT: DeduplicationTab -->
+                <div id="dedup-tab" class="tab-content hidden">
+                    <div class="max-w-5xl mx-auto">
+                        <div class="mb-6">
+                            <h3 class="text-lg font-medium text-gray-900">Deduplication Engine</h3>
+                            <p class="text-carbon-gray-60">Identify and merge similar nodes and relations to maintain graph integrity</p>
+                        </div>
+
+                        <!-- Deduplication Stats -->
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                            <div class="bg-white rounded-lg border border-carbon-gray-20 p-6">
+                                <div class="flex items-center">
+                                    <div class="w-12 h-12 bg-carbon-yellow bg-opacity-10 rounded-lg flex items-center justify-center">
+                                        <i class="fas fa-exclamation-triangle text-carbon-yellow text-xl"></i>
+                                    </div>
+                                    <div class="ml-4">
+                                        <p class="text-2xl font-semibold text-gray-900" data-mock="true">23</p>
+                                        <p class="text-carbon-gray-60">Potential Duplicates</p>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="bg-white rounded-lg border border-carbon-gray-20 p-6">
+                                <div class="flex items-center">
+                                    <div class="w-12 h-12 bg-carbon-green bg-opacity-10 rounded-lg flex items-center justify-center">
+                                        <i class="fas fa-compress-arrows-alt text-carbon-green text-xl"></i>
+                                    </div>
+                                    <div class="ml-4">
+                                        <p class="text-2xl font-semibold text-gray-900" data-mock="true">147</p>
+                                        <p class="text-carbon-gray-60">Auto-Merged</p>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="bg-white rounded-lg border border-carbon-gray-20 p-6">
+                                <div class="flex items-center">
+                                    <div class="w-12 h-12 bg-carbon-blue bg-opacity-10 rounded-lg flex items-center justify-center">
+                                        <i class="fas fa-percentage text-carbon-blue text-xl"></i>
+                                    </div>
+                                    <div class="ml-4">
+                                        <p class="text-2xl font-semibold text-gray-900" data-mock="true">94.8%</p>
+                                        <p class="text-carbon-gray-60">Accuracy Rate</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Deduplication Algorithm Settings -->
+                        <div class="bg-white rounded-lg border border-carbon-gray-20 mb-6">
+                            <div class="border-b border-carbon-gray-20 p-4">
+                                <h4 class="font-medium text-gray-900">Algorithm Configuration</h4>
+                            </div>
+                            <div class="p-6">
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-2">Similarity Threshold</label>
+                                        <div class="flex items-center space-x-4">
+                                            <input type="range" class="flex-1" min="0" max="100" value="85" data-mock="true">
+                                            <span class="text-sm text-carbon-gray-60 w-12">85%</span>
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-2">Algorithm Type</label>
+                                        <select class="w-full border border-carbon-gray-30 rounded-lg px-3 py-2" data-mock="true">
+                                            <option>Semantic Similarity (BERT)</option>
+                                            <option>Edit Distance</option>
+                                            <option>Hybrid Approach</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="mt-4 flex space-x-3">
+                                    <button class="bg-carbon-blue text-white px-4 py-2 rounded-lg hover:bg-blue-700" data-event="click:runDeduplication">
+                                        <i class="fas fa-play mr-2"></i>
+                                        Run Deduplication
+                                    </button>
+                                    <button class="bg-white border border-carbon-gray-30 text-gray-700 px-4 py-2 rounded-lg hover:bg-carbon-gray-10">
+                                        <i class="fas fa-save mr-2"></i>
+                                        Save Settings
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Duplicate Candidates -->
+                        <div class="bg-white rounded-lg border border-carbon-gray-20">
+                            <div class="border-b border-carbon-gray-20 p-4">
+                                <h4 class="font-medium text-gray-900">Review Duplicate Candidates</h4>
+                            </div>
+                            <div class="p-4 space-y-4">
+                                <!-- @MAP: duplicateCandidates.map(pair => ( -->
+                                <div class="border border-carbon-gray-20 rounded-lg p-4">
+                                    <div class="flex items-center justify-between mb-4">
+                                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-carbon-yellow bg-opacity-10 text-carbon-yellow">
+                                            89% similarity
+                                        </span>
+                                        <div class="flex space-x-2">
+                                            <button class="bg-carbon-green text-white px-3 py-1 rounded text-sm hover:bg-green-600" data-event="click:mergeDuplicates">
+                                                <i class="fas fa-compress-arrows-alt mr-1"></i>
+                                                Merge
+                                            </button>
+                                            <button class="bg-carbon-red text-white px-3 py-1 rounded text-sm hover:bg-red-600" data-event="click:keepSeparate">
+                                                <i class="fas fa-times mr-1"></i>
+                                                Keep Separate
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        <div class="border border-carbon-gray-20 rounded p-3">
+                                            <h5 class="font-medium text-gray-900 mb-2" data-mock="true">Quality Assurance</h5>
+                                            <p class="text-sm text-carbon-gray-60 mb-2" data-mock="true">Process of ensuring products meet quality standards through systematic testing and validation.</p>
+                                            <p class="text-xs text-carbon-gray-50">Source: Quality_Control_Manual.pdf</p>
+                                        </div>
+                                        <div class="border border-carbon-gray-20 rounded p-3">
+                                            <h5 class="font-medium text-gray-900 mb-2" data-mock="true">Quality Control</h5>
+                                            <p class="text-sm text-carbon-gray-60 mb-2" data-mock="true">Systematic process for ensuring product quality through testing, inspection, and validation procedures.</p>
+                                            <p class="text-xs text-carbon-gray-50">Source: Manufacturing_Process_Guide.pdf</p>
+                                        </div>
+                                    </div>
+                                </div>
+                                <!-- @END_MAP )) -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <!-- @END_COMPONENT: DeduplicationTab -->
+
+                <!-- @COMPONENT: GraphTab -->
+                <div id="graph-tab" class="tab-content hidden">
+                    <div class="max-w-7xl mx-auto">
+                        <div class="mb-6">
+                            <h3 class="text-lg font-medium text-gray-900">Knowledge Graph Visualization</h3>
+                            <p class="text-carbon-gray-60">Interactive visualization of your knowledge graph structure</p>
+                        </div>
+
+                        <!-- Graph Controls -->
+                        <div class="bg-white rounded-lg border border-carbon-gray-20 mb-6 p-4">
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center space-x-4">
+                                    <div class="flex items-center space-x-2">
+                                        <label class="text-sm font-medium text-gray-700">Layout:</label>
+                                        <select class="border border-carbon-gray-30 rounded px-3 py-1 text-sm" data-mock="true">
+                                            <option>Force-directed</option>
+                                            <option>Hierarchical</option>
+                                            <option>Circular</option>
+                                        </select>
+                                    </div>
+                                    <div class="flex items-center space-x-2">
+                                        <label class="text-sm font-medium text-gray-700">Filter:</label>
+                                        <select class="border border-carbon-gray-30 rounded px-3 py-1 text-sm" data-mock="true">
+                                            <option>All nodes</option>
+                                            <option>Manufacturing only</option>
+                                            <option>Quality Control only</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="flex items-center space-x-2">
+                                    <button class="bg-white border border-carbon-gray-30 text-gray-700 px-3 py-1 rounded text-sm hover:bg-carbon-gray-10">
+                                        <i class="fas fa-search-minus mr-1"></i>
+                                        Zoom Out
+                                    </button>
+                                    <button class="bg-white border border-carbon-gray-30 text-gray-700 px-3 py-1 rounded text-sm hover:bg-carbon-gray-10">
+                                        <i class="fas fa-search-plus mr-1"></i>
+                                        Zoom In
+                                    </button>
+                                    <button class="bg-carbon-blue text-white px-3 py-1 rounded text-sm hover:bg-blue-700">
+                                        <i class="fas fa-download mr-1"></i>
+                                        Export
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Graph Visualization Area -->
+                        <div class="bg-white rounded-lg border border-carbon-gray-20">
+                            <!-- @FUNCTIONALITY: This graph visualization should implement an interactive network graph using D3.js or similar library -->
+                            <div class="h-96 flex items-center justify-center bg-gradient-to-br from-carbon-gray-10 to-white rounded-lg">
+                                <div class="text-center">
+                                    <i class="fas fa-project-diagram text-4xl text-carbon-gray-50 mb-4"></i>
+                                    <h4 class="text-lg font-medium text-gray-900 mb-2">Interactive Graph Visualization</h4>
+                                    <p class="text-carbon-gray-60 mb-6">Your knowledge graph will be rendered here with interactive nodes and edges</p>
+                                    <div class="flex items-center justify-center space-x-6 text-sm text-carbon-gray-60">
+                                        <div class="flex items-center space-x-2">
+                                            <div class="w-4 h-4 bg-carbon-blue rounded-full"></div>
+                                            <span>Entity Nodes (1,247)</span>
+                                        </div>
+                                        <div class="flex items-center space-x-2">
+                                            <div class="w-4 h-4 bg-carbon-green rounded-full"></div>
+                                            <span>Concept Nodes (892)</span>
+                                        </div>
+                                        <div class="flex items-center space-x-2">
+                                            <div class="w-0 h-0 border-l-2 border-r-2 border-b-4 border-l-transparent border-r-transparent border-b-carbon-gray-50"></div>
+                                            <span>Relations (3,891)</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Graph Statistics -->
+                        <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mt-6">
+                            <div class="bg-white rounded-lg border border-carbon-gray-20 p-4 text-center">
+                                <p class="text-2xl font-semibold text-gray-900" data-mock="true">2,139</p>
+                                <p class="text-carbon-gray-60 text-sm">Total Nodes</p>
+                            </div>
+                            <div class="bg-white rounded-lg border border-carbon-gray-20 p-4 text-center">
+                                <p class="text-2xl font-semibold text-gray-900" data-mock="true">3,891</p>
+                                <p class="text-carbon-gray-60 text-sm">Total Relations</p>
+                            </div>
+                            <div class="bg-white rounded-lg border border-carbon-gray-20 p-4 text-center">
+                                <p class="text-2xl font-semibold text-gray-900" data-mock="true">47</p>
+                                <p class="text-carbon-gray-60 text-sm">Connected Components</p>
+                            </div>
+                            <div class="bg-white rounded-lg border border-carbon-gray-20 p-4 text-center">
+                                <p class="text-2xl font-semibold text-gray-900" data-mock="true">8.3</p>
+                                <p class="text-carbon-gray-60 text-sm">Avg Degree</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <!-- @END_COMPONENT: GraphTab -->
+
+                <!-- @COMPONENT: ChatTab -->
+                <div id="chat-tab" class="tab-content hidden">
+                    <div class="max-w-6xl mx-auto">
+                        <div class="mb-6">
+                            <h3 class="text-lg font-medium text-gray-900">Natural Language Query Interface</h3>
+                            <p class="text-carbon-gray-60">Ask questions about your knowledge graph using natural language</p>
+                        </div>
+
+                        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                            <!-- Chat Interface -->
+                            <div class="lg:col-span-2">
+                                <div class="bg-white rounded-lg border border-carbon-gray-20 flex flex-col h-96">
+                                    <!-- Chat Header -->
+                                    <div class="border-b border-carbon-gray-20 p-4">
+                                        <div class="flex items-center space-x-3">
+                                            <div class="w-8 h-8 bg-carbon-blue rounded-full flex items-center justify-center">
+                                                <i class="fas fa-robot text-white text-sm"></i>
+                                            </div>
+                                            <div>
+                                                <h4 class="font-medium text-gray-900">GraphfloorGPT Assistant</h4>
+                                                <p class="text-sm text-carbon-gray-60">Connected to your knowledge graph</p>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <!-- Chat Messages -->
+                                    <div class="flex-1 p-4 overflow-y-auto space-y-4">
+                                        <!-- @MAP: messages.map(message => ( -->
+                                        <div class="flex items-start space-x-3">
+                                            <div class="w-8 h-8 bg-carbon-blue rounded-full flex items-center justify-center flex-shrink-0">
+                                                <i class="fas fa-robot text-white text-sm"></i>
+                                            </div>
+                                            <div class="flex-1">
+                                                <p class="text-sm text-gray-900" data-mock="true">Hello! I can help you query your knowledge graph. You can ask me questions like "What quality control processes are required for manufacturing equipment?" or "Show me all nodes related to production lines."</p>
+                                                <p class="text-xs text-carbon-gray-60 mt-1">Now</p>
+                                            </div>
+                                        </div>
+
+                                        <div class="flex items-start space-x-3 justify-end">
+                                            <div class="flex-1 text-right">
+                                                <div class="inline-block bg-carbon-blue text-white rounded-lg px-4 py-2 max-w-md">
+                                                    <p class="text-sm" data-mock="true">What are the main components of our manufacturing process?</p>
+                                                </div>
+                                                <p class="text-xs text-carbon-gray-60 mt-1">2 minutes ago</p>
+                                            </div>
+                                            <div class="w-8 h-8 bg-carbon-gray-50 rounded-full flex items-center justify-center flex-shrink-0">
+                                                <i class="fas fa-user text-carbon-gray-60 text-sm"></i>
+                                            </div>
+                                        </div>
+
+                                        <div class="flex items-start space-x-3">
+                                            <div class="w-8 h-8 bg-carbon-blue rounded-full flex items-center justify-center flex-shrink-0">
+                                                <i class="fas fa-robot text-white text-sm"></i>
+                                            </div>
+                                            <div class="flex-1">
+                                                <p class="text-sm text-gray-900" data-mock="true">Based on your knowledge graph, the main components of your manufacturing process include:</p>
+                                                <ul class="text-sm text-gray-900 mt-2 space-y-1 list-disc list-inside" data-mock="true">
+                                                    <li>Manufacturing Equipment (CNC machines, conveyor systems)</li>
+                                                    <li>Raw Materials (steel, aluminum, components)</li>
+                                                    <li>Production Lines (assembly sequences)</li>
+                                                    <li>Quality Control (testing and validation)</li>
+                                                    <li>Personnel (operators, supervisors, inspectors)</li>
+                                                </ul>
+                                                <p class="text-xs text-carbon-gray-60 mt-2">Graph query executed in 247ms</p>
+                                            </div>
+                                        </div>
+                                        <!-- @END_MAP )) -->
+                                    </div>
+
+                                    <!-- Chat Input -->
+                                    <div class="border-t border-carbon-gray-20 p-4">
+                                        <div class="flex space-x-3">
+                                            <input 
+                                                type="text" 
+                                                placeholder="Ask about your knowledge graph..." 
+                                                class="flex-1 border border-carbon-gray-30 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-carbon-blue focus:border-transparent"
+                                                data-mock="true"
+                                                data-event="keypress:handleChatSubmit"
+                                            >
+                                            <button class="bg-carbon-blue text-white px-4 py-2 rounded-lg hover:bg-blue-700" data-event="click:sendMessage">
+                                                <i class="fas fa-paper-plane"></i>
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Query Translation Panel -->
+                            <div class="space-y-6">
+                                <!-- Quick Queries -->
+                                <div class="bg-white rounded-lg border border-carbon-gray-20">
+                                    <div class="border-b border-carbon-gray-20 p-4">
+                                        <h4 class="font-medium text-gray-900">Quick Queries</h4>
+                                    </div>
+                                    <div class="p-4 space-y-2">
+                                        <button class="w-full text-left text-sm text-carbon-blue hover:bg-blue-50 p-2 rounded" data-event="click:executeQuickQuery">
+                                            Show all manufacturing nodes
+                                        </button>
+                                        <button class="w-full text-left text-sm text-carbon-blue hover:bg-blue-50 p-2 rounded" data-event="click:executeQuickQuery">
+                                            Find quality control relations
+                                        </button>
+                                        <button class="w-full text-left text-sm text-carbon-blue hover:bg-blue-50 p-2 rounded" data-event="click:executeQuickQuery">
+                                            List all equipment types
+                                        </button>
+                                        <button class="w-full text-left text-sm text-carbon-blue hover:bg-blue-50 p-2 rounded" data-event="click:executeQuickQuery">
+                                            Show production dependencies
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <!-- Query Statistics -->
+                                <div class="bg-white rounded-lg border border-carbon-gray-20">
+                                    <div class="border-b border-carbon-gray-20 p-4">
+                                        <h4 class="font-medium text-gray-900">Query Statistics</h4>
+                                    </div>
+                                    <div class="p-4 space-y-3">
+                                        <div class="flex justify-between">
+                                            <span class="text-sm text-carbon-gray-60">Total Queries</span>
+                                            <span class="text-sm font-medium text-gray-900" data-mock="true">1,247</span>
+                                        </div>
+                                        <div class="flex justify-between">
+                                            <span class="text-sm text-carbon-gray-60">Avg Response Time</span>
+                                            <span class="text-sm font-medium text-gray-900" data-mock="true">247ms</span>
+                                        </div>
+                                        <div class="flex justify-between">
+                                            <span class="text-sm text-carbon-gray-60">Success Rate</span>
+                                            <span class="text-sm font-medium text-gray-900" data-mock="true">94.2%</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <!-- @END_COMPONENT: ChatTab -->
+
+                <!-- @COMPONENT: DeveloperTab -->
+                <div id="dev-tab" class="tab-content hidden">
+                    <div class="max-w-7xl mx-auto">
+                        <div class="mb-6">
+                            <h3 class="text-lg font-medium text-gray-900">Developer Console</h3>
+                            <p class="text-carbon-gray-60">Monitor query translations and improve the natural language processing</p>
+                        </div>
+
+                        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                            <!-- Query Translation Log -->
+                            <div class="space-y-6">
+                                <div class="bg-white rounded-lg border border-carbon-gray-20">
+                                    <div class="border-b border-carbon-gray-20 p-4">
+                                        <h4 class="font-medium text-gray-900">Recent Query Translations</h4>
+                                    </div>
+                                    <div class="p-4 space-y-4">
+                                        <!-- @MAP: queryTranslations.map(translation => ( -->
+                                        <div class="border border-carbon-gray-20 rounded-lg p-4">
+                                            <div class="mb-3">
+                                                <div class="flex items-center justify-between mb-2">
+                                                    <span class="text-sm font-medium text-gray-900">Natural Language Query:</span>
+                                                    <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-carbon-green bg-opacity-10 text-carbon-green">
+                                                        <i class="fas fa-check mr-1"></i>
+                                                        Success
+                                                    </span>
+                                                </div>
+                                                <p class="text-sm text-carbon-gray-60 bg-carbon-gray-10 p-2 rounded" data-mock="true">"What equipment requires quality control?"</p>
+                                            </div>
+                                            <div class="mb-3">
+                                                <p class="text-sm font-medium text-gray-900 mb-2">Generated Graph Query:</p>
+                                                <pre class="text-xs font-ibm-mono bg-gray-900 text-green-400 p-3 rounded overflow-x-auto" data-mock="true">MATCH (e:Equipment)-[:REQUIRES]->(qc:QualityControl)
+RETURN e.name, qc.name, qc.description
+ORDER BY e.name</pre>
+                                            </div>
+                                            <div class="flex items-center justify-between text-xs text-carbon-gray-60">
+                                                <span>Executed: 2 minutes ago</span>
+                                                <span>Response time: 145ms</span>
+                                            </div>
+                                            <div class="mt-3 flex space-x-2">
+                                                <button class="bg-carbon-green text-white px-3 py-1 rounded text-xs hover:bg-green-600" data-event="click:approveTranslation">
+                                                    <i class="fas fa-thumbs-up mr-1"></i>
+                                                    Approve
+                                                </button>
+                                                <button class="bg-carbon-yellow text-white px-3 py-1 rounded text-xs hover:bg-yellow-600" data-event="click:suggestImprovement">
+                                                    <i class="fas fa-edit mr-1"></i>
+                                                    Suggest Improvement
+                                                </button>
+                                            </div>
+                                        </div>
+                                        <!-- @END_MAP )) -->
+                                        
+                                        <div class="border border-carbon-gray-20 rounded-lg p-4">
+                                            <div class="mb-3">
+                                                <div class="flex items-center justify-between mb-2">
+                                                    <span class="text-sm font-medium text-gray-900">Natural Language Query:</span>
+                                                    <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-carbon-red bg-opacity-10 text-carbon-red">
+                                                        <i class="fas fa-times mr-1"></i>
+                                                        Failed
+                                                    </span>
+                                                </div>
+                                                <p class="text-sm text-carbon-gray-60 bg-carbon-gray-10 p-2 rounded" data-mock="true">"Show me the thingamajigs connected to production"</p>
+                                            </div>
+                                            <div class="mb-3">
+                                                <p class="text-sm font-medium text-gray-900 mb-2">Error:</p>
+                                                <pre class="text-xs font-ibm-mono bg-red-50 text-red-700 p-3 rounded" data-mock="true">Could not identify entity type: "thingamajigs"
+Suggestion: Use more specific terms like "equipment", "materials", or "processes"</pre>
+                                            </div>
+                                            <div class="flex items-center justify-between text-xs text-carbon-gray-60">
+                                                <span>Failed: 5 minutes ago</span>
+                                                <span>No query generated</span>
+                                            </div>
+                                            <div class="mt-3 flex space-x-2">
+                                                <button class="bg-carbon-blue text-white px-3 py-1 rounded text-xs hover:bg-blue-700" data-event="click:addTrainingExample">
+                                                    <i class="fas fa-plus mr-1"></i>
+                                                    Add Training Example
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Query Builder & Testing -->
+                            <div class="space-y-6">
+                                <!-- Manual Query Builder -->
+                                <div class="bg-white rounded-lg border border-carbon-gray-20">
+                                    <div class="border-b border-carbon-gray-20 p-4">
+                                        <h4 class="font-medium text-gray-900">Manual Query Builder</h4>
+                                    </div>
+                                    <div class="p-4">
+                                        <div class="space-y-4">
+                                            <div>
+                                                <label class="block text-sm font-medium text-gray-700 mb-2">Graph Query (Cypher)</label>
+                                                <textarea 
+                                                    class="w-full h-32 border border-carbon-gray-30 rounded-lg px-3 py-2 font-ibm-mono text-sm focus:outline-none focus:ring-2 focus:ring-carbon-blue focus:border-transparent" 
+                                                    placeholder="MATCH (n:Node) RETURN n"
+                                                    data-mock="true"
+                                                ></textarea>
+                                            </div>
+                                            <div class="flex space-x-3">
+                                                <button class="bg-carbon-blue text-white px-4 py-2 rounded-lg hover:bg-blue-700 text-sm" data-event="click:executeQuery">
+                                                    <i class="fas fa-play mr-2"></i>
+                                                    Execute Query
+                                                </button>
+                                                <button class="bg-white border border-carbon-gray-30 text-gray-700 px-4 py-2 rounded-lg hover:bg-carbon-gray-10 text-sm" data-event="click:validateQuery">
+                                                    <i class="fas fa-check mr-2"></i>
+                                                    Validate
+                                                </button>
+                                                <button class="bg-white border border-carbon-gray-30 text-gray-700 px-4 py-2 rounded-lg hover:bg-carbon-gray-10 text-sm" data-event="click:saveQuery">
+                                                    <i class="fas fa-save mr-2"></i>
+                                                    Save
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Query Results -->
+                                <div class="bg-white rounded-lg border border-carbon-gray-20">
+                                    <div class="border-b border-carbon-gray-20 p-4">
+                                        <h4 class="font-medium text-gray-900">Query Results</h4>
+                                    </div>
+                                    <div class="p-4">
+                                        <div class="bg-carbon-gray-10 rounded-lg p-4 h-48 overflow-auto">
+                                            <pre class="text-sm font-ibm-mono text-carbon-gray-60" data-mock="true">Query not executed yet.
+Run a query to see results here.</pre>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Training Data Management -->
+                                <div class="bg-white rounded-lg border border-carbon-gray-20">
+                                    <div class="border-b border-carbon-gray-20 p-4">
+                                        <h4 class="font-medium text-gray-900">Training Data</h4>
+                                    </div>
+                                    <div class="p-4">
+                                        <div class="space-y-3">
+                                            <div class="flex justify-between items-center">
+                                                <span class="text-sm text-carbon-gray-60">Training Examples</span>
+                                                <span class="text-sm font-medium text-gray-900" data-mock="true">247</span>
+                                            </div>
+                                            <div class="flex justify-between items-center">
+                                                <span class="text-sm text-carbon-gray-60">Approved Translations</span>
+                                                <span class="text-sm font-medium text-gray-900" data-mock="true">189</span>
+                                            </div>
+                                            <div class="flex justify-between items-center">
+                                                <span class="text-sm text-carbon-gray-60">Pending Review</span>
+                                                <span class="text-sm font-medium text-gray-900" data-mock="true">12</span>
+                                            </div>
+                                            <div class="pt-3 border-t border-carbon-gray-20">
+                                                <button class="w-full bg-carbon-blue text-white px-4 py-2 rounded-lg hover:bg-blue-700 text-sm" data-event="click:retrainModel">
+                                                    <i class="fas fa-sync mr-2"></i>
+                                                    Retrain Translation Model
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <!-- @END_COMPONENT: DeveloperTab -->
+
+            </div>
+            <!-- @END_COMPONENT: ContentArea -->
+        </main>
+        <!-- @END_COMPONENT: MainContent -->
+    </div>
+    <!-- @END_COMPONENT: MainLayout -->
+
+    <script>
+    (function() {
+        // Tab Navigation
+        const navLinks = document.querySelectorAll('.nav-link');
+        const tabContents = document.querySelectorAll('.tab-content');
+        const pageTitle = document.getElementById('page-title');
+        const pageSubtitle = document.getElementById('page-subtitle');
+
+        const tabData = {
+            upload: {
+                title: 'PDF Upload & Processing',
+                subtitle: 'Upload PDFs to extract and convert into knowledge graph nodes'
+            },
+            nodes: {
+                title: 'Node & Relation Management',
+                subtitle: 'Review and approve suggested nodes and relations from your documents'
+            },
+            dedup: {
+                title: 'Deduplication Engine',
+                subtitle: 'Identify and merge similar nodes and relations to maintain graph integrity'
+            },
+            graph: {
+                title: 'Knowledge Graph Visualization',
+                subtitle: 'Interactive visualization of your knowledge graph structure'
+            },
+            chat: {
+                title: 'Natural Language Query Interface',
+                subtitle: 'Ask questions about your knowledge graph using natural language'
+            },
+            dev: {
+                title: 'Developer Console',
+                subtitle: 'Monitor query translations and improve the natural language processing'
+            }
+        };
+
+        navLinks.forEach(link => {
+            link.addEventListener('click', (e) => {
+                e.preventDefault();
+                const targetTab = link.getAttribute('data-tab');
+                
+                // Update navigation
+                navLinks.forEach(nav => {
+                    nav.classList.remove('bg-carbon-blue', 'text-white');
+                    nav.classList.add('text-carbon-gray-30', 'hover:bg-carbon-gray-70', 'hover:text-white');
+                });
+                link.classList.add('bg-carbon-blue', 'text-white');
+                link.classList.remove('text-carbon-gray-30', 'hover:bg-carbon-gray-70', 'hover:text-white');
+                
+                // Update content
+                tabContents.forEach(content => {
+                    content.classList.add('hidden');
+                });
+                document.getElementById(`${targetTab}-tab`).classList.remove('hidden');
+                
+                // Update header
+                if (tabData[targetTab]) {
+                    pageTitle.textContent = tabData[targetTab].title;
+                    pageSubtitle.textContent = tabData[targetTab].subtitle;
+                }
+            });
+        });
+
+        // File upload simulation
+        document.addEventListener('click', (e) => {
+            if (e.target.matches('[data-event*="handleFileUpload"]')) {
+                // TODO: Implement file upload handling with Langfuse API integration
+                console.log('File upload clicked');
+            }
+            
+            if (e.target.matches('[data-event*="approveNode"]')) {
+                // TODO: Implement node approval logic
+                console.log('Node approved');
+            }
+            
+            if (e.target.matches('[data-event*="sendMessage"]')) {
+                // TODO: Implement chat message sending with graph query translation
+                console.log('Chat message sent');
+            }
+            
+            if (e.target.matches('[data-event*="executeQuery"]')) {
+                // TODO: Implement manual query execution against Neo4j
+                console.log('Manual query executed');
+            }
+            
+            if (e.target.matches('[data-event*="runDeduplication"]')) {
+                // TODO: Implement deduplication algorithm execution
+                console.log('Deduplication started');
+            }
+        });
+
+        // Chat input handling
+        document.addEventListener('keypress', (e) => {
+            if (e.target.matches('[data-event*="handleChatSubmit"]') && e.key === 'Enter') {
+                // TODO: Implement chat submission logic
+                console.log('Chat message submitted via Enter key');
+            }
+        });
+
+        // Initialize tooltips and other interactive elements
+        // TODO: Add tooltips, loading states, and real-time updates
+        
+    })();
+    </script>
+</body>
+</html>

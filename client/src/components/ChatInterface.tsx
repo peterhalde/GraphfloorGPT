@@ -5,7 +5,20 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useToast } from "@/hooks/use-toast";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { apiRequest } from "@/lib/queryClient";
+import { Trash2, Send } from "lucide-react";
+import ModelSelector from "./ModelSelector";
 
 interface Message {
   id: string;
@@ -14,9 +27,23 @@ interface Message {
   timestamp: string;
 }
 
+interface MetricsData {
+  totalQueries: number;
+  avgResponseTime: number;
+  successRate: number;
+  cacheHitRate: number;
+}
+
+interface MessagesResponse {
+  messages: Message[];
+}
+
 export default function ChatInterface() {
   const [currentMessage, setCurrentMessage] = useState("");
-  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [sessionId, setSessionId] = useState<string | null>(() => {
+    // Try to restore session from localStorage
+    return localStorage.getItem('chatSessionId');
+  });
   const scrollRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -28,17 +55,53 @@ export default function ChatInterface() {
       return response.json();
     },
     onSuccess: (data) => {
-      setSessionId(data.session.id);
+      const newSessionId = data.session.id;
+      setSessionId(newSessionId);
+      // Save session to localStorage
+      localStorage.setItem('chatSessionId', newSessionId);
     },
   });
 
   // Get chat messages
-  const { data: messagesResponse } = useQuery({
+  const { data: messagesResponse } = useQuery<MessagesResponse>({
     queryKey: ["/api/chat/sessions", sessionId, "messages"],
     enabled: !!sessionId,
   });
   
   const messages = messagesResponse?.messages || [];
+
+  // Get GraphRAG metrics
+  const { data: metricsData } = useQuery<MetricsData>({
+    queryKey: ["/api/graphrag/metrics"],
+    refetchInterval: 30000, // Refetch every 30 seconds
+  });
+
+  // Clear chat mutation
+  const clearChatMutation = useMutation({
+    mutationFn: async () => {
+      // Create a new session
+      const response = await apiRequest("POST", "/api/chat/sessions");
+      return response.json();
+    },
+    onSuccess: (data) => {
+      const newSessionId = data.session.id;
+      setSessionId(newSessionId);
+      localStorage.setItem('chatSessionId', newSessionId);
+      // Clear the messages cache
+      queryClient.invalidateQueries({ queryKey: ["/api/chat/sessions"] });
+      toast({
+        title: "Chat cleared",
+        description: "Started a new conversation",
+      });
+    },
+    onError: (error) => {
+      toast({
+        title: "Failed to clear chat",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
 
   // Send message mutation
   const sendMessageMutation = useMutation({
@@ -87,10 +150,10 @@ export default function ChatInterface() {
   };
 
   const quickQueries = [
-    "Show all manufacturing nodes",
-    "Find quality control relations",
-    "List all equipment types",
-    "Show production dependencies",
+    "Which nodes do you have?",
+    "What ingredients are needed for Flammkuchen?",
+    "Show me all recipes",
+    "List all ingredients",
   ];
 
   return (
@@ -103,22 +166,54 @@ export default function ChatInterface() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Chat Interface */}
         <div className="lg:col-span-2">
-          <Card className="flex flex-col h-96">
+          <Card className="flex flex-col h-[600px]">
             {/* Chat Header */}
             <div className="border-b border-carbon-gray-20 p-4">
-              <div className="flex items-center space-x-3">
-                <div className="w-8 h-8 bg-carbon-blue rounded-full flex items-center justify-center">
-                  <i className="fas fa-robot text-white text-sm"></i>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-3">
+                  <div className="w-8 h-8 bg-carbon-blue rounded-full flex items-center justify-center">
+                    <i className="fas fa-robot text-white text-sm"></i>
+                  </div>
+                  <div>
+                    <h4 className="font-medium text-gray-900">GraphfloorGPT Assistant</h4>
+                    <p className="text-sm text-carbon-gray-60">Connected to your knowledge graph</p>
+                  </div>
                 </div>
-                <div>
-                  <h4 className="font-medium text-gray-900">GraphfloorGPT Assistant</h4>
-                  <p className="text-sm text-carbon-gray-60">Connected to your knowledge graph</p>
+                <div className="flex items-center space-x-2">
+                  <ModelSelector />
+                  <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={messages.length === 0}
+                        title="Clear chat history"
+                        className="hover:bg-red-50 hover:text-red-600"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>Clear Chat History</AlertDialogTitle>
+                        <AlertDialogDescription>
+                          This will start a new conversation and clear all messages. This action cannot be undone.
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                        <AlertDialogAction onClick={() => clearChatMutation.mutate()}>
+                          Clear Chat
+                        </AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
                 </div>
               </div>
             </div>
 
             {/* Chat Messages */}
-            <ScrollArea className="flex-1 p-4" ref={scrollRef}>
+            <ScrollArea className="flex-1 p-4 h-full" ref={scrollRef}>
               <div className="space-y-4">
                 {messages.length === 0 && (
                   <div className="flex items-start space-x-3">
@@ -147,7 +242,7 @@ export default function ChatInterface() {
                           <p className="text-sm">{message.content}</p>
                         </div>
                       ) : (
-                        <p className="text-sm text-gray-900">{message.content}</p>
+                        <div className="text-sm text-gray-900 whitespace-pre-wrap">{message.content}</div>
                       )}
                       <p className="text-xs text-carbon-gray-60 mt-1">
                         {new Date(message.timestamp).toLocaleTimeString()}
@@ -189,7 +284,7 @@ export default function ChatInterface() {
                   onClick={handleSendMessage}
                   disabled={sendMessageMutation.isPending || !sessionId || !currentMessage.trim()}
                 >
-                  <i className="fas fa-paper-plane"></i>
+                  <Send className="h-4 w-4" />
                 </Button>
               </div>
             </div>
@@ -226,15 +321,27 @@ export default function ChatInterface() {
             <CardContent className="p-4 space-y-3">
               <div className="flex justify-between">
                 <span className="text-sm text-carbon-gray-60">Total Queries</span>
-                <span className="text-sm font-medium text-gray-900">-</span>
+                <span className="text-sm font-medium text-gray-900">
+                  {metricsData?.totalQueries || 0}
+                </span>
               </div>
               <div className="flex justify-between">
                 <span className="text-sm text-carbon-gray-60">Avg Response Time</span>
-                <span className="text-sm font-medium text-gray-900">-</span>
+                <span className="text-sm font-medium text-gray-900">
+                  {metricsData?.avgResponseTime ? `${Math.round(metricsData.avgResponseTime)}ms` : '-'}
+                </span>
               </div>
               <div className="flex justify-between">
                 <span className="text-sm text-carbon-gray-60">Success Rate</span>
-                <span className="text-sm font-medium text-gray-900">-</span>
+                <span className="text-sm font-medium text-gray-900">
+                  {metricsData?.successRate !== undefined ? `${Math.round(metricsData.successRate * 100)}%` : '-'}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-sm text-carbon-gray-60">Cache Hit Rate</span>
+                <span className="text-sm font-medium text-gray-900">
+                  {metricsData?.cacheHitRate !== undefined ? `${Math.round(metricsData.cacheHitRate * 100)}%` : '-'}
+                </span>
               </div>
             </CardContent>
           </Card>

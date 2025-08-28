@@ -1,0 +1,1748 @@
+# Progressive GraphRAG Pipeline Implementation Strategy
+
+## Architecture Overview
+
+This strategy implements a 5-stage progressive enhancement pipeline that evolves from simple template matching to sophisticated LLM-powered query generation, leveraging Neo4j's fine-tuned text2cypher-gemma-2-9b model and LangChain's GraphCypherQAChain.
+
+```
+Stage 1: Template-Based → Stage 2: NLP Enhanced → Stage 3: Hybrid → Stage 4: LLM Primary → Stage 5: Advanced GraphRAG
+```
+
+## Stage 1: Template-Based Foundation
+
+### 1.1 Project Setup
+
+```bash
+# Initialize Node.js project
+npm init -y
+npm install neo4j-driver langchain @langchain/neo4j @langchain/openai
+npm install express dotenv helmet cors
+npm install --save-dev typescript @types/node nodemon ts-node
+```
+
+### 1.2 Core Infrastructure
+
+**config/database.js**
+```javascript
+const neo4j = require('neo4j-driver');
+
+class Neo4jConnection {
+  constructor() {
+    this.driver = neo4j.driver(
+      process.env.NEO4J_URI || 'bolt://localhost:7687',
+      neo4j.auth.basic(
+        process.env.NEO4J_USERNAME || 'neo4j',
+        process.env.NEO4J_PASSWORD || 'password'
+      )
+    );
+  }
+
+  async getSession() {
+    return this.driver.session();
+  }
+
+  async close() {
+    await this.driver.close();
+  }
+
+  // Essential for schema-aware query generation
+  async getSchema() {
+    const session = await this.getSession();
+    try {
+      const result = await session.run(`
+        CALL apoc.meta.schema()
+        YIELD value
+        RETURN value
+      `);
+      return result.records[0].get('value');
+    } finally {
+      await session.close();
+    }
+  }
+
+  async getSchemaText() {
+    const session = await this.getSession();
+    try {
+      const nodeLabels = await session.run('CALL db.labels()');
+      const relationshipTypes = await session.run('CALL db.relationshipTypes()');
+      const propertyKeys = await session.run('CALL db.propertyKeys()');
+      
+      const labels = nodeLabels.records.map(r => r.get('label'));
+      const relationships = relationshipTypes.records.map(r => r.get('relationshipType'));
+      const properties = propertyKeys.records.map(r => r.get('propertyKey'));
+      
+      return {
+        nodeLabels: labels,
+        relationshipTypes: relationships,
+        propertyKeys: properties,
+        schemaText: this.formatSchema(labels, relationships, properties)
+      };
+    } finally {
+      await session.close();
+    }
+  }
+
+  formatSchema(labels, relationships, properties) {
+    const nodeSchema = labels.map(label => `(:${label})`).join(', ');
+    const relSchema = relationships.map(rel => `[:${rel}]`).join(', ');
+    return `Nodes: ${nodeSchema}\nRelationships: ${relSchema}\nProperties: ${properties.join(', ')}`;
+  }
+}
+
+module.exports = { Neo4jConnection };
+```
+
+### 1.3 Template-Based Query Engine
+
+**services/templateQueryEngine.js**
+```javascript
+class TemplateQueryEngine {
+  constructor(neo4jConnection) {
+    this.db = neo4jConnection;
+    this.templates = this.initializeTemplates();
+  }
+
+  initializeTemplates() {
+    return [
+      // Recipe domain templates
+      {
+        pattern: /ingredients.*(?:for|of|in)\s+(.+)/i,
+        domain: 'recipe',
+        template: `
+          MATCH (r:Recipe {name: $recipeName})-[:CONTAINS]->(i:Ingredient)
+          RETURN i.name as ingredient, i.quantity as quantity, i.unit as unit
+        `,
+        extractor: (match) => ({ recipeName: match[1].trim() })
+      },
+      {
+        pattern: /recipes.*(?:with|containing|using)\s+(.+)/i,
+        domain: 'recipe',
+        template: `
+          MATCH (i:Ingredient {name: $ingredientName})<-[:CONTAINS]-(r:Recipe)
+          RETURN r.name as recipe, r.description as description
+        `,
+        extractor: (match) => ({ ingredientName: match[1].trim() })
+      },
+      {
+        pattern: /cooking time.*(?:for|of)\s+(.+)/i,
+        domain: 'recipe',
+        template: `
+          MATCH (r:Recipe {name: $recipeName})
+          RETURN r.cookingTime as cookingTime, r.prepTime as prepTime
+        `,
+        extractor: (match) => ({ recipeName: match[1].trim() })
+      },
+      // Technical manual templates (preparation for Stage 2)
+      {
+        pattern: /components.*(?:of|in)\s+(.+)/i,
+        domain: 'technical',
+        template: `
+          MATCH (s:System {name: $systemName})-[:HAS_COMPONENT]->(c:Component)
+          RETURN c.name as component, c.type as type, c.description as description
+        `,
+        extractor: (match) => ({ systemName: match[1].trim() })
+      }
+    ];
+  }
+
+  async processQuery(userQuery) {
+    console.log(`Processing template query: ${userQuery}`);
+    
+    for (const template of this.templates) {
+      const match = userQuery.match(template.pattern);
+      if (match) {
+        try {
+          const parameters = template.extractor(match);
+          const result = await this.executeQuery(template.template, parameters);
+          
+          return {
+            success: true,
+            method: 'template',
+            domain: template.domain,
+            cypher: template.template,
+            parameters,
+            results: result
+          };
+        } catch (error) {
+          console.error('Template query failed:', error);
+          continue;
+        }
+      }
+    }
+    
+    return { 
+      success: false, 
+      error: 'No matching template found',
+      suggestion: 'Try rephrasing your query or use more specific terms'
+    };
+  }
+
+  async executeQuery(cypher, parameters = {}) {
+    const session = await this.db.getSession();
+    try {
+      const result = await session.run(cypher, parameters);
+      return result.records.map(record => record.toObject());
+    } finally {
+      await session.close();
+    }
+  }
+}
+
+module.exports = { TemplateQueryEngine };
+```
+
+## Stage 2: NLP-Enhanced Query Processing
+
+### 2.1 Entity Recognition and Intent Classification
+
+**services/nlpProcessor.js**
+```javascript
+const { TfIdf, WordTokenizer, SentenceTokenizer } = require('natural');
+
+class NLPProcessor {
+  constructor() {
+    this.tokenizer = new WordTokenizer();
+    this.sentenceTokenizer = new SentenceTokenizer();
+    this.intentClassifier = this.initializeIntentClassifier();
+    this.entityExtractor = this.initializeEntityExtractor();
+  }
+
+  initializeIntentClassifier() {
+    // Simple TF-IDF based intent classification
+    return {
+      'find_ingredients': ['ingredients', 'components', 'parts', 'contains', 'made of'],
+      'find_recipes': ['recipes', 'dishes', 'meals', 'cook', 'make', 'prepare'],
+      'find_procedures': ['steps', 'instructions', 'how to', 'procedure', 'process'],
+      'find_properties': ['time', 'duration', 'temperature', 'size', 'weight'],
+      'find_relationships': ['connected to', 'related to', 'depends on', 'requires']
+    };
+  }
+
+  initializeEntityExtractor() {
+    return {
+      recipe: /\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\b/g,
+      ingredient: /\b([a-z]+(?:\s+[a-z]+)*)\b/g,
+      quantity: /\b(\d+(?:\.\d+)?)\s*(cup|cups|tablespoon|teaspoon|pound|ounce|gram|ml|liter)s?\b/gi,
+      time: /\b(\d+)\s*(minute|hour|second)s?\b/gi
+    };
+  }
+
+  async processQuery(userQuery) {
+    const intent = this.classifyIntent(userQuery);
+    const entities = this.extractEntities(userQuery);
+    const keywords = this.extractKeywords(userQuery);
+
+    return {
+      originalQuery: userQuery,
+      intent,
+      entities,
+      keywords,
+      confidence: this.calculateConfidence(intent, entities)
+    };
+  }
+
+  classifyIntent(query) {
+    const tokens = this.tokenizer.tokenize(query.toLowerCase());
+    let bestIntent = 'unknown';
+    let maxScore = 0;
+
+    for (const [intent, keywords] of Object.entries(this.intentClassifier)) {
+      const score = keywords.reduce((acc, keyword) => {
+        return acc + (tokens.includes(keyword) ? 1 : 0);
+      }, 0);
+
+      if (score > maxScore) {
+        maxScore = score;
+        bestIntent = intent;
+      }
+    }
+
+    return { intent: bestIntent, confidence: maxScore / tokens.length };
+  }
+
+  extractEntities(query) {
+    const entities = {};
+    
+    for (const [type, pattern] of Object.entries(this.entityExtractor)) {
+      const matches = [...query.matchAll(pattern)];
+      if (matches.length > 0) {
+        entities[type] = matches.map(match => match[1] || match[0]);
+      }
+    }
+
+    return entities;
+  }
+
+  extractKeywords(query) {
+    const tokens = this.tokenizer.tokenize(query.toLowerCase());
+    const stopWords = ['the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by'];
+    return tokens.filter(token => !stopWords.includes(token) && token.length > 2);
+  }
+
+  calculateConfidence(intent, entities) {
+    const intentScore = intent.confidence || 0;
+    const entityScore = Object.keys(entities).length * 0.1;
+    return Math.min(intentScore + entityScore, 1.0);
+  }
+}
+
+module.exports = { NLPProcessor };
+```
+
+### 2.2 Enhanced Query Router
+
+**services/queryRouter.js**
+```javascript
+class QueryRouter {
+  constructor(templateEngine, nlpProcessor, neo4jConnection) {
+    this.templateEngine = templateEngine;
+    this.nlpProcessor = nlpProcessor;
+    this.db = neo4jConnection;
+  }
+
+  async routeQuery(userQuery) {
+    // Stage 1: Try template matching first (fast path)
+    const templateResult = await this.templateEngine.processQuery(userQuery);
+    if (templateResult.success) {
+      return { ...templateResult, stage: 1 };
+    }
+
+    // Stage 2: Use NLP processing for enhanced matching
+    const nlpResult = await this.nlpProcessor.processQuery(userQuery);
+    
+    if (nlpResult.confidence > 0.3) {
+      const enhancedQuery = await this.generateEnhancedQuery(nlpResult);
+      if (enhancedQuery.success) {
+        return { ...enhancedQuery, stage: 2, nlpAnalysis: nlpResult };
+      }
+    }
+
+    // Fallback: Return structured error with suggestions
+    return {
+      success: false,
+      stage: 0,
+      error: 'Unable to process query',
+      nlpAnalysis: nlpResult,
+      suggestions: this.generateSuggestions(nlpResult)
+    };
+  }
+
+  async generateEnhancedQuery(nlpResult) {
+    const { intent, entities, keywords } = nlpResult;
+
+    // Generate dynamic Cypher based on intent and entities
+    let cypher = '';
+    let parameters = {};
+
+    switch (intent.intent) {
+      case 'find_ingredients':
+        if (entities.recipe && entities.recipe.length > 0) {
+          cypher = `
+            MATCH (r:Recipe)
+            WHERE toLower(r.name) CONTAINS toLower($recipeName)
+            MATCH (r)-[:CONTAINS]->(i:Ingredient)
+            RETURN i.name as ingredient, i.quantity as quantity, i.unit as unit
+          `;
+          parameters.recipeName = entities.recipe[0];
+        }
+        break;
+
+      case 'find_recipes':
+        if (entities.ingredient && entities.ingredient.length > 0) {
+          cypher = `
+            MATCH (i:Ingredient)
+            WHERE toLower(i.name) CONTAINS toLower($ingredientName)
+            MATCH (i)<-[:CONTAINS]-(r:Recipe)
+            RETURN r.name as recipe, r.description as description
+          `;
+          parameters.ingredientName = entities.ingredient[0];
+        }
+        break;
+
+      default:
+        // Keyword-based fallback query
+        cypher = this.generateKeywordQuery(keywords);
+        parameters.keywords = keywords;
+    }
+
+    if (cypher) {
+      try {
+        const results = await this.executeQuery(cypher, parameters);
+        return {
+          success: true,
+          method: 'nlp-enhanced',
+          intent: intent.intent,
+          cypher,
+          parameters,
+          results
+        };
+      } catch (error) {
+        return { success: false, error: error.message };
+      }
+    }
+
+    return { success: false, error: 'Could not generate query from NLP analysis' };
+  }
+
+  generateKeywordQuery(keywords) {
+    return `
+      MATCH (n)
+      WHERE any(keyword in $keywords WHERE 
+        toLower(toString(n.name)) CONTAINS toLower(keyword) OR
+        toLower(toString(n.description)) CONTAINS toLower(keyword)
+      )
+      RETURN n.name as name, labels(n) as type, n.description as description
+      LIMIT 10
+    `;
+  }
+
+  generateSuggestions(nlpResult) {
+    const suggestions = [];
+    
+    if (nlpResult.entities.recipe) {
+      suggestions.push(`Try: "What are the ingredients for ${nlpResult.entities.recipe[0]}?"`);
+    }
+    
+    if (nlpResult.keywords.length > 0) {
+      suggestions.push(`Try being more specific about: ${nlpResult.keywords.join(', ')}`);
+    }
+
+    suggestions.push('Use specific terms like "ingredients", "recipes", "cooking time"');
+    
+    return suggestions;
+  }
+
+  async executeQuery(cypher, parameters = {}) {
+    const session = await this.db.getSession();
+    try {
+      const result = await session.run(cypher, parameters);
+      return result.records.map(record => record.toObject());
+    } finally {
+      await session.close();
+    }
+  }
+}
+
+module.exports = { QueryRouter };
+```
+
+## Stage 3: Hybrid LLM Integration
+
+### 3.1 Neo4j Text2Cypher Model Integration
+
+**services/text2cypherService.js**
+```javascript
+const { HfInference } = require('@huggingface/inference');
+
+class Text2CypherService {
+  constructor(neo4jConnection) {
+    this.db = neo4jConnection;
+    this.hf = new HfInference(process.env.HUGGINGFACE_API_KEY);
+    this.modelId = 'neo4j/text2cypher-gemma-2-9b-it-finetuned-2024v1';
+    this.schemaCache = null;
+    this.schemaCacheTime = null;
+  }
+
+  async getSchema() {
+    const now = Date.now();
+    if (!this.schemaCache || (now - this.schemaCacheTime) > 300000) { // 5 min cache
+      this.schemaCache = await this.db.getSchemaText();
+      this.schemaCacheTime = now;
+    }
+    return this.schemaCache;
+  }
+
+  prepareChatPrompt(question, schema) {
+    const instruction = `Generate Cypher statement to query a graph database. 
+Use only the provided relationship types and properties in the schema.
+
+Schema: ${schema.schemaText}
+
+Question: ${question}
+
+Cypher output:`;
+
+    return [
+      {
+        role: "user",
+        content: instruction
+      }
+    ];
+  }
+
+  postprocessOutputCypher(outputCypher) {
+    // Remove explanations and markdown formatting
+    let cleaned = outputCypher.split("**Explanation:**")[0];
+    cleaned = cleaned.replace(/```cypher\n?/g, '').replace(/```\n?/g, '');
+    cleaned = cleaned.replace(/^cypher\n/i, '');
+    return cleaned.trim();
+  }
+
+  async generateCypher(question, retries = 2) {
+    try {
+      const schema = await this.getSchema();
+      const messages = this.prepareChatPrompt(question, schema);
+      
+      const response = await this.hf.textGeneration({
+        model: this.modelId,
+        inputs: messages[0].content,
+        parameters: {
+          max_new_tokens: 512,
+          temperature: 0.2,
+          top_p: 0.9,
+          do_sample: true,
+          return_full_text: false
+        }
+      });
+
+      const rawCypher = response.generated_text;
+      const cleanedCypher = this.postprocessOutputCypher(rawCypher);
+
+      // Validate Cypher syntax
+      const validation = await this.validateCypher(cleanedCypher);
+      
+      return {
+        success: validation.isValid,
+        cypher: cleanedCypher,
+        rawOutput: rawCypher,
+        validation,
+        schema: schema.schemaText
+      };
+
+    } catch (error) {
+      if (retries > 0) {
+        console.warn(`Text2Cypher failed, retrying... (${retries} attempts left)`);
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        return this.generateCypher(question, retries - 1);
+      }
+      
+      return {
+        success: false,
+        error: error.message,
+        cypher: null
+      };
+    }
+  }
+
+  async validateCypher(cypher) {
+    if (!cypher || cypher.trim().length === 0) {
+      return { isValid: false, error: 'Empty query generated' };
+    }
+
+    const session = await this.db.getSession();
+    try {
+      // Use EXPLAIN to validate syntax without execution
+      await session.run(`EXPLAIN ${cypher}`);
+      return { isValid: true };
+    } catch (error) {
+      return { 
+        isValid: false, 
+        error: error.message,
+        suggestion: 'Query has syntax errors'
+      };
+    } finally {
+      await session.close();
+    }
+  }
+
+  async executeCypher(cypher, limit = 50) {
+    const session = await this.db.getSession();
+    try {
+      // Add LIMIT if not present for safety
+      const safeCypher = cypher.includes('LIMIT') ? cypher : `${cypher} LIMIT ${limit}`;
+      
+      const result = await session.run(safeCypher);
+      return result.records.map(record => record.toObject());
+    } finally {
+      await session.close();
+    }
+  }
+}
+
+module.exports = { Text2CypherService };
+```
+
+### 3.2 Advanced Query Router with LLM Fallback
+
+**services/advancedQueryRouter.js**
+```javascript
+class AdvancedQueryRouter {
+  constructor(templateEngine, nlpProcessor, text2cypherService, neo4jConnection) {
+    this.templateEngine = templateEngine;
+    this.nlpProcessor = nlpProcessor;
+    this.text2cypherService = text2cypherService;
+    this.db = neo4jConnection;
+    this.queryCache = new Map();
+  }
+
+  async routeQuery(userQuery, options = {}) {
+    const startTime = Date.now();
+    const cacheKey = this.generateCacheKey(userQuery, options);
+    
+    // Check cache first
+    if (this.queryCache.has(cacheKey)) {
+      const cached = this.queryCache.get(cacheKey);
+      return { ...cached, fromCache: true, processingTime: Date.now() - startTime };
+    }
+
+    let result = null;
+
+    // Stage 1: Template matching (fastest)
+    if (!options.skipTemplates) {
+      result = await this.templateEngine.processQuery(userQuery);
+      if (result.success) {
+        result.stage = 1;
+        result.method = 'template';
+        this.cacheResult(cacheKey, result);
+        result.processingTime = Date.now() - startTime;
+        return result;
+      }
+    }
+
+    // Stage 2: NLP-enhanced processing
+    if (!options.skipNLP) {
+      const nlpResult = await this.nlpProcessor.processQuery(userQuery);
+      
+      if (nlpResult.confidence > 0.3) {
+        const enhancedResult = await this.generateEnhancedQuery(nlpResult);
+        if (enhancedResult.success) {
+          result = { ...enhancedResult, stage: 2, nlpAnalysis: nlpResult };
+          this.cacheResult(cacheKey, result);
+          result.processingTime = Date.now() - startTime;
+          return result;
+        }
+      }
+    }
+
+    // Stage 3: LLM-powered Text2Cypher (most powerful but slowest)
+    if (!options.skipLLM) {
+      const llmResult = await this.text2cypherService.generateCypher(userQuery);
+      
+      if (llmResult.success) {
+        try {
+          const queryResults = await this.text2cypherService.executeCypher(llmResult.cypher);
+          
+          result = {
+            success: true,
+            stage: 3,
+            method: 'text2cypher-llm',
+            cypher: llmResult.cypher,
+            results: queryResults,
+            validation: llmResult.validation,
+            rawLLMOutput: llmResult.rawOutput
+          };
+          
+          this.cacheResult(cacheKey, result);
+          result.processingTime = Date.now() - startTime;
+          return result;
+          
+        } catch (executionError) {
+          console.error('LLM-generated query execution failed:', executionError);
+        }
+      }
+    }
+
+    // All stages failed
+    result = {
+      success: false,
+      stage: 0,
+      error: 'Unable to process query using any method',
+      suggestions: await this.generateFailureSuggestions(userQuery),
+      processingTime: Date.now() - startTime
+    };
+
+    return result;
+  }
+
+  async generateEnhancedQuery(nlpResult) {
+    // Implementation from Stage 2 with improvements
+    const { intent, entities, keywords } = nlpResult;
+
+    // More sophisticated query generation based on domain detection
+    if (this.isRecipeDomain(entities, keywords)) {
+      return this.generateRecipeQuery(intent, entities, keywords);
+    } else if (this.isTechnicalDomain(entities, keywords)) {
+      return this.generateTechnicalQuery(intent, entities, keywords);
+    }
+
+    return this.generateGenericQuery(keywords);
+  }
+
+  isRecipeDomain(entities, keywords) {
+    const recipeKeywords = ['recipe', 'ingredient', 'cooking', 'cook', 'dish', 'meal', 'food'];
+    return keywords.some(kw => recipeKeywords.includes(kw.toLowerCase())) ||
+           entities.recipe || entities.ingredient;
+  }
+
+  isTechnicalDomain(entities, keywords) {
+    const technicalKeywords = ['component', 'system', 'part', 'technical', 'manual', 'specification'];
+    return keywords.some(kw => technicalKeywords.includes(kw.toLowerCase()));
+  }
+
+  async generateRecipeQuery(intent, entities, keywords) {
+    // Enhanced recipe query generation
+    let cypher = '';
+    let parameters = {};
+
+    if (intent.intent === 'find_ingredients' && entities.recipe) {
+      cypher = `
+        MATCH (r:Recipe)
+        WHERE toLower(r.name) CONTAINS toLower($recipeName)
+        OPTIONAL MATCH (r)-[:CONTAINS]->(i:Ingredient)
+        RETURN r.name as recipe, 
+               collect({
+                 ingredient: i.name,
+                 quantity: i.quantity,
+                 unit: i.unit
+               }) as ingredients,
+               r.cookingTime as cookingTime,
+               r.difficulty as difficulty
+      `;
+      parameters.recipeName = entities.recipe[0];
+    } else if (intent.intent === 'find_recipes' && entities.ingredient) {
+      cypher = `
+        MATCH (i:Ingredient)
+        WHERE toLower(i.name) CONTAINS toLower($ingredientName)
+        MATCH (i)<-[:CONTAINS]-(r:Recipe)
+        RETURN r.name as recipe, 
+               r.description as description,
+               r.cookingTime as cookingTime,
+               r.difficulty as difficulty
+        ORDER BY r.rating DESC
+      `;
+      parameters.ingredientName = entities.ingredient[0];
+    }
+
+    if (cypher) {
+      try {
+        const results = await this.executeQuery(cypher, parameters);
+        return {
+          success: true,
+          method: 'nlp-enhanced-recipe',
+          intent: intent.intent,
+          domain: 'recipe',
+          cypher,
+          parameters,
+          results
+        };
+      } catch (error) {
+        return { success: false, error: error.message };
+      }
+    }
+
+    return { success: false, error: 'Could not generate recipe query' };
+  }
+
+  generateCacheKey(query, options) {
+    return `${query}:${JSON.stringify(options)}`.toLowerCase();
+  }
+
+  cacheResult(key, result) {
+    // Simple LRU cache implementation
+    if (this.queryCache.size >= 1000) {
+      const firstKey = this.queryCache.keys().next().value;
+      this.queryCache.delete(firstKey);
+    }
+    this.queryCache.set(key, { ...result, timestamp: Date.now() });
+  }
+
+  async generateFailureSuggestions(userQuery) {
+    const schema = await this.text2cypherService.getSchema();
+    const suggestions = [
+      'Try using specific terms from your domain',
+      `Available node types: ${schema.nodeLabels.join(', ')}`,
+      `Available relationships: ${schema.relationshipTypes.join(', ')}`,
+      'Example: "What are the ingredients for chocolate cake?"',
+      'Example: "Show me recipes with tomatoes"'
+    ];
+    
+    return suggestions;
+  }
+
+  async executeQuery(cypher, parameters = {}) {
+    const session = await this.db.getSession();
+    try {
+      const result = await session.run(cypher, parameters);
+      return result.records.map(record => record.toObject());
+    } finally {
+      await session.close();
+    }
+  }
+}
+
+module.exports = { AdvancedQueryRouter };
+```
+
+## Stage 4: LangChain GraphCypherQAChain Integration
+
+### 4.1 LangChain GraphRAG Service
+
+**services/langchainGraphRAG.js**
+```javascript
+const { GraphCypherQAChain } = require("@langchain/neo4j");
+const { ChatOpenAI } = require("@langchain/openai");
+const { Neo4jGraph } = require("@langchain/neo4j");
+
+class LangChainGraphRAG {
+  constructor(neo4jConnection) {
+    this.db = neo4jConnection;
+    this.graph = null;
+    this.qaChain = null;
+    this.llm = null;
+    this.initializationPromise = this.initialize();
+  }
+
+  async initialize() {
+    try {
+      // Initialize Neo4j Graph connection
+      this.graph = await Neo4jGraph.initialize({
+        url: process.env.NEO4J_URI || 'bolt://localhost:7687',
+        username: process.env.NEO4J_USERNAME || 'neo4j',
+        password: process.env.NEO4J_PASSWORD || 'password',
+      });
+
+      // Initialize LLM (OpenAI or alternative)
+      this.llm = new ChatOpenAI({
+        modelName: process.env.OPENAI_MODEL || "gpt-4",
+        temperature: 0.2,
+        openAIApiKey: process.env.OPENAI_API_KEY,
+      });
+
+      // Create the GraphCypher QA Chain
+      this.qaChain = GraphCypherQAChain.fromLLM({
+        llm: this.llm,
+        graph: this.graph,
+        verbose: process.env.NODE_ENV === 'development',
+        returnDirect: false,
+        returnIntermediateSteps: true,
+      });
+
+      console.log('LangChain GraphRAG initialized successfully');
+    } catch (error) {
+      console.error('Failed to initialize LangChain GraphRAG:', error);
+      throw error;
+    }
+  }
+
+  async ensureInitialized() {
+    await this.initializationPromise;
+  }
+
+  async queryGraph(question, options = {}) {
+    await this.ensureInitialized();
+    
+    try {
+      const startTime = Date.now();
+      
+      // Enhanced query with context
+      const enhancedQuestion = this.enhanceQuestion(question, options);
+      
+      const result = await this.qaChain.call({
+        query: enhancedQuestion,
+        // Additional options can be passed here
+        ...options
+      });
+
+      const processingTime = Date.now() - startTime;
+
+      return {
+        success: true,
+        method: 'langchain-graphcypher',
+        stage: 4,
+        question: enhancedQuestion,
+        answer: result.result,
+        cypher: result.intermediateSteps?.[0]?.query || null,
+        context: result.intermediateSteps?.[0]?.context || null,
+        processingTime,
+        metadata: {
+          llmModel: this.llm.modelName,
+          returnedIntermediateSteps: !!result.intermediateSteps
+        }
+      };
+
+    } catch (error) {
+      console.error('LangChain GraphRAG query failed:', error);
+      
+      return {
+        success: false,
+        method: 'langchain-graphcypher',
+        stage: 4,
+        error: error.message,
+        suggestion: this.generateErrorSuggestion(error)
+      };
+    }
+  }
+
+  enhanceQuestion(question, options) {
+    // Add domain context to improve query generation
+    let enhancedQuestion = question;
+
+    if (options.domain === 'recipe') {
+      enhancedQuestion = `In the context of recipes and cooking: ${question}`;
+    } else if (options.domain === 'technical') {
+      enhancedQuestion = `In the context of technical documentation and systems: ${question}`;
+    }
+
+    // Add examples for complex queries
+    if (options.includeExamples) {
+      enhancedQuestion += `\n\nPlease provide specific details and relationships from the graph database.`;
+    }
+
+    return enhancedQuestion;
+  }
+
+  generateErrorSuggestion(error) {
+    if (error.message.includes('syntax')) {
+      return 'Try rephrasing your question more clearly or use simpler terms.';
+    } else if (error.message.includes('timeout')) {
+      return 'Your query might be too complex. Try breaking it into smaller questions.';
+    } else if (error.message.includes('rate limit')) {
+      return 'API rate limit reached. Please wait a moment before trying again.';
+    }
+    
+    return 'Please try rephrasing your question or contact support if the issue persists.';
+  }
+
+  async refreshSchema() {
+    await this.ensureInitialized();
+    
+    try {
+      await this.graph.refreshSchema();
+      console.log('Graph schema refreshed successfully');
+      return { success: true };
+    } catch (error) {
+      console.error('Failed to refresh schema:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  async getGraphSchema() {
+    await this.ensureInitialized();
+    return this.graph.schema;
+  }
+}
+
+module.exports = { LangChainGraphRAG };
+```
+
+### 4.2 Master Query Orchestrator
+
+**services/masterQueryOrchestrator.js**
+```javascript
+class MasterQueryOrchestrator {
+  constructor(
+    templateEngine, 
+    nlpProcessor, 
+    text2cypherService, 
+    langchainGraphRAG,
+    neo4jConnection
+  ) {
+    this.templateEngine = templateEngine;
+    this.nlpProcessor = nlpProcessor;
+    this.text2cypherService = text2cypherService;
+    this.langchainGraphRAG = langchainGraphRAG;
+    this.db = neo4jConnection;
+    
+    // Performance tracking
+    this.metrics = {
+      totalQueries: 0,
+      successByStage: { 1: 0, 2: 0, 3: 0, 4: 0 },
+      averageLatency: { 1: 0, 2: 0, 3: 0, 4: 0 },
+      errorCounts: { 1: 0, 2: 0, 3: 0, 4: 0 }
+    };
+  }
+
+  async processQuery(userQuery, options = {}) {
+    this.metrics.totalQueries++;
+    const queryId = this.generateQueryId();
+    const startTime = Date.now();
+
+    console.log(`[${queryId}] Processing query: "${userQuery}"`);
+
+    // Determine processing strategy based on options and query complexity
+    const strategy = this.determineStrategy(userQuery, options);
+    
+    let result = null;
+
+    try {
+      switch (strategy.approach) {
+        case 'progressive':
+          result = await this.progressiveProcessing(userQuery, options, queryId);
+          break;
+        case 'direct-llm':
+          result = await this.directLLMProcessing(userQuery, options, queryId);
+          break;
+        case 'hybrid-parallel':
+          result = await this.hybridParallelProcessing(userQuery, options, queryId);
+          break;
+        default:
+          result = await this.progressiveProcessing(userQuery, options, queryId);
+      }
+
+      // Update metrics
+      if (result.success) {
+        this.metrics.successByStage[result.stage]++;
+      } else {
+        this.metrics.errorCounts[result.stage || 0]++;
+      }
+
+    } catch (error) {
+      console.error(`[${queryId}] Processing failed:`, error);
+      result = {
+        success: false,
+        error: error.message,
+        queryId,
+        stage: 0
+      };
+    }
+
+    const totalTime = Date.now() - startTime;
+    result.queryId = queryId;
+    result.totalProcessingTime = totalTime;
+
+    console.log(`[${queryId}] Completed in ${totalTime}ms - Success: ${result.success} - Stage: ${result.stage}`);
+
+    return result;
+  }
+
+  determineStrategy(userQuery, options) {
+    // Analyze query complexity
+    const complexity = this.analyzeQueryComplexity(userQuery);
+    
+    if (options.forceStrategy) {
+      return { approach: options.forceStrategy, complexity };
+    }
+
+    // Strategy selection logic
+    if (complexity.score < 0.3) {
+      return { approach: 'progressive', complexity };
+    } else if (complexity.score > 0.8) {
+      return { approach: 'direct-llm', complexity };
+    } else {
+      return { approach: 'hybrid-parallel', complexity };
+    }
+  }
+
+  analyzeQueryComplexity(userQuery) {
+    const complexityIndicators = [
+      'multi-hop', 'relationship', 'connected', 'path', 'chain',
+      'analyze', 'compare', 'aggregate', 'count', 'average',
+      'most', 'least', 'best', 'worst', 'similar', 'related'
+    ];
+
+    const tokens = userQuery.toLowerCase().split(' ');
+    const complexityScore = complexityIndicators.reduce((score, indicator) => {
+      return score + (tokens.some(token => token.includes(indicator)) ? 0.1 : 0);
+    }, 0);
+
+    return {
+      score: Math.min(complexityScore, 1.0),
+      indicators: complexityIndicators.filter(ind => 
+        tokens.some(token => token.includes(ind))
+      ),
+      length: tokens.length,
+      hasNegation: tokens.some(token => ['not', 'without', 'except'].includes(token))
+    };
+  }
+
+  async progressiveProcessing(userQuery, options, queryId) {
+    console.log(`[${queryId}] Using progressive processing strategy`);
+
+    // Stage 1: Template matching
+    if (!options.skipTemplates) {
+      const templateResult = await this.templateEngine.processQuery(userQuery);
+      if (templateResult.success) {
+        console.log(`[${queryId}] Resolved at Stage 1 (Template)`);
+        return { ...templateResult, stage: 1, queryId };
+      }
+    }
+
+    // Stage 2: NLP-enhanced processing
+    if (!options.skipNLP) {
+      const nlpResult = await this.nlpProcessor.processQuery(userQuery);
+      if (nlpResult.confidence > 0.4) {
+        // Implementation would go here based on previous code
+        console.log(`[${queryId}] Attempting Stage 2 (NLP-Enhanced)`);
+        // ... NLP processing logic
+      }
+    }
+
+    // Stage 3: Text2Cypher model
+    if (!options.skipText2Cypher) {
+      console.log(`[${queryId}] Attempting Stage 3 (Text2Cypher)`);
+      const text2cypherResult = await this.text2cypherService.generateCypher(userQuery);
+      
+      if (text2cypherResult.success) {
+        try {
+          const results = await this.text2cypherService.executeCypher(text2cypherResult.cypher);
+          console.log(`[${queryId}] Resolved at Stage 3 (Text2Cypher)`);
+          
+          return {
+            success: true,
+            stage: 3,
+            method: 'text2cypher',
+            cypher: text2cypherResult.cypher,
+            results,
+            queryId
+          };
+        } catch (executionError) {
+          console.warn(`[${queryId}] Text2Cypher execution failed:`, executionError.message);
+        }
+      }
+    }
+
+    // Stage 4: LangChain GraphRAG
+    if (!options.skipLangChain) {
+      console.log(`[${queryId}] Attempting Stage 4 (LangChain GraphRAG)`);
+      const langchainResult = await this.langchainGraphRAG.queryGraph(userQuery, {
+        domain: this.detectDomain(userQuery),
+        includeExamples: true
+      });
+
+      if (langchainResult.success) {
+        console.log(`[${queryId}] Resolved at Stage 4 (LangChain GraphRAG)`);
+        return { ...langchainResult, queryId };
+      }
+    }
+
+    // All stages failed
+    return {
+      success: false,
+      error: 'All processing stages failed',
+      suggestions: await this.generateComprehensiveSuggestions(userQuery),
+      queryId,
+      stage: 0
+    };
+  }
+
+  async directLLMProcessing(userQuery, options, queryId) {
+    console.log(`[${queryId}] Using direct LLM processing strategy`);
+    
+    // Go straight to the most powerful method
+    const langchainResult = await this.langchainGraphRAG.queryGraph(userQuery, {
+      domain: this.detectDomain(userQuery),
+      includeExamples: true,
+      complexQuery: true
+    });
+
+    return { ...langchainResult, queryId };
+  }
+
+  async hybridParallelProcessing(userQuery, options, queryId) {
+    console.log(`[${queryId}] Using hybrid parallel processing strategy`);
+
+    // Run multiple approaches in parallel and select the best result
+    const promises = [];
+
+    if (!options.skipText2Cypher) {
+      promises.push(
+        this.text2cypherService.generateCypher(userQuery)
+          .then(async result => {
+            if (result.success) {
+              try {
+                const queryResults = await this.text2cypherService.executeCypher(result.cypher);
+                return {
+                  ...result,
+                  stage: 3,
+                  method: 'text2cypher-parallel',
+                  results: queryResults
+                };
+              } catch (error) {
+                return { ...result, success: false, error: error.message };
+              }
+            }
+            return result;
+          })
+          .catch(error => ({ success: false, error: error.message, stage: 3 }))
+      );
+    }
+
+    if (!options.skipLangChain) {
+      promises.push(
+        this.langchainGraphRAG.queryGraph(userQuery, {
+          domain: this.detectDomain(userQuery),
+          includeExamples: false
+        })
+        .then(result => ({ ...result, method: 'langchain-parallel' }))
+        .catch(error => ({ success: false, error: error.message, stage: 4 }))
+      );
+    }
+
+    try {
+      const results = await Promise.allSettled(promises);
+      
+      // Select the best successful result
+      const successfulResults = results
+        .filter(result => result.status === 'fulfilled' && result.value.success)
+        .map(result => result.value);
+
+      if (successfulResults.length > 0) {
+        // Prefer LangChain result if both succeed, as it typically provides better answers
+        const bestResult = successfulResults.find(r => r.stage === 4) || successfulResults[0];
+        console.log(`[${queryId}] Parallel processing succeeded with ${bestResult.method}`);
+        
+        return { ...bestResult, queryId, parallelAttempts: results.length };
+      }
+
+      // All parallel attempts failed
+      const errors = results.map(r => 
+        r.status === 'fulfilled' ? r.value.error : r.reason.message
+      );
+      
+      return {
+        success: false,
+        error: 'All parallel processing attempts failed',
+        individualErrors: errors,
+        queryId,
+        stage: 0
+      };
+
+    } catch (error) {
+      return {
+        success: false,
+        error: `Parallel processing error: ${error.message}`,
+        queryId,
+        stage: 0
+      };
+    }
+  }
+
+  detectDomain(userQuery) {
+    const recipeKeywords = ['recipe', 'ingredient', 'cook', 'meal', 'food', 'dish'];
+    const technicalKeywords = ['system', 'component', 'technical', 'manual', 'specification'];
+    
+    const query = userQuery.toLowerCase();
+    
+    if (recipeKeywords.some(keyword => query.includes(keyword))) {
+      return 'recipe';
+    } else if (technicalKeywords.some(keyword => query.includes(keyword))) {
+      return 'technical';
+    }
+    
+    return 'general';
+  }
+
+  async generateComprehensiveSuggestions(userQuery) {
+    const schema = await this.text2cypherService.getSchema();
+    
+    return [
+      'Query processing failed at all stages. Try these approaches:',
+      `• Use specific terms from available data: ${schema.nodeLabels.slice(0, 5).join(', ')}`,
+      '• Break complex questions into simpler parts',
+      '• Be more specific about what you want to find',
+      '• Example: "What ingredients are needed for chocolate cake?"',
+      '• Example: "Show me all recipes that use tomatoes"',
+      '• Try using relationship terms like "contains", "requires", "connects to"'
+    ];
+  }
+
+  generateQueryId() {
+    return Date.now().toString(36) + Math.random().toString(36).substr(2);
+  }
+
+  getMetrics() {
+    return {
+      ...this.metrics,
+      successRate: this.metrics.totalQueries > 0 
+        ? Object.values(this.metrics.successByStage).reduce((a, b) => a + b, 0) / this.metrics.totalQueries 
+        : 0
+    };
+  }
+
+  resetMetrics() {
+    this.metrics = {
+      totalQueries: 0,
+      successByStage: { 1: 0, 2: 0, 3: 0, 4: 0 },
+      averageLatency: { 1: 0, 2: 0, 3: 0, 4: 0 },
+      errorCounts: { 1: 0, 2: 0, 3: 0, 4: 0 }
+    };
+  }
+}
+
+module.exports = { MasterQueryOrchestrator };
+```
+
+## Stage 5: Production API and Advanced Features
+
+### 5.1 Express API with Comprehensive Endpoints
+
+**app.js**
+```javascript
+const express = require('express');
+const cors = require('cors');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
+
+// Import all services
+const { Neo4jConnection } = require('./config/database');
+const { TemplateQueryEngine } = require('./services/templateQueryEngine');
+const { NLPProcessor } = require('./services/nlpProcessor');
+const { Text2CypherService } = require('./services/text2cypherService');
+const { LangChainGraphRAG } = require('./services/langchainGraphRAG');
+const { MasterQueryOrchestrator } = require('./services/masterQueryOrchestrator');
+
+const app = express();
+
+// Middleware
+app.use(helmet());
+app.use(cors());
+app.use(express.json({ limit: '10mb' }));
+
+// Rate limiting
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100 // limit each IP to 100 requests per windowMs
+});
+app.use('/api', limiter);
+
+// Global error handling middleware
+app.use((err, req, res, next) => {
+  console.error('Global error handler:', err);
+  res.status(500).json({
+    success: false,
+    error: 'Internal server error',
+    message: process.env.NODE_ENV === 'development' ? err.message : 'Something went wrong'
+  });
+});
+
+class GraphRAGServer {
+  constructor() {
+    this.db = null;
+    this.orchestrator = null;
+    this.isInitialized = false;
+  }
+
+  async initialize() {
+    try {
+      console.log('Initializing GraphRAG server...');
+
+      // Initialize database connection
+      this.db = new Neo4jConnection();
+      
+      // Initialize all services
+      const templateEngine = new TemplateQueryEngine(this.db);
+      const nlpProcessor = new NLPProcessor();
+      const text2cypherService = new Text2CypherService(this.db);
+      const langchainGraphRAG = new LangChainGraphRAG(this.db);
+
+      // Initialize master orchestrator
+      this.orchestrator = new MasterQueryOrchestrator(
+        templateEngine,
+        nlpProcessor,
+        text2cypherService,
+        langchainGraphRAG,
+        this.db
+      );
+
+      // Test database connection
+      await this.testConnection();
+
+      this.isInitialized = true;
+      console.log('GraphRAG server initialized successfully');
+    } catch (error) {
+      console.error('Failed to initialize GraphRAG server:', error);
+      throw error;
+    }
+  }
+
+  async testConnection() {
+    const session = await this.db.getSession();
+    try {
+      await session.run('RETURN 1');
+      console.log('Database connection successful');
+    } finally {
+      await session.close();
+    }
+  }
+
+  setupRoutes() {
+    // Health check endpoint
+    app.get('/health', (req, res) => {
+      res.json({
+        status: 'healthy',
+        timestamp: new Date().toISOString(),
+        initialized: this.isInitialized
+      });
+    });
+
+    // Main query endpoint
+    app.post('/api/query', async (req, res) => {
+      try {
+        const { query, options = {} } = req.body;
+
+        if (!query || typeof query !== 'string') {
+          return res.status(400).json({
+            success: false,
+            error: 'Query is required and must be a string'
+          });
+        }
+
+        if (!this.isInitialized) {
+          return res.status(503).json({
+            success: false,
+            error: 'Service not ready'
+          });
+        }
+
+        const result = await this.orchestrator.processQuery(query, options);
+        
+        res.json({
+          success: result.success,
+          data: result.success ? {
+            answer: result.answer,
+            cypher: result.cypher,
+            results: result.results,
+            method: result.method,
+            stage: result.stage,
+            processingTime: result.totalProcessingTime,
+            queryId: result.queryId
+          } : null,
+          error: result.success ? null : result.error,
+          suggestions: result.suggestions || null,
+          metadata: {
+            queryId: result.queryId,
+            timestamp: new Date().toISOString(),
+            stage: result.stage,
+            method: result.method
+          }
+        });
+
+      } catch (error) {
+        console.error('Query processing error:', error);
+        res.status(500).json({
+          success: false,
+          error: 'Query processing failed',
+          message: error.message
+        });
+      }
+    });
+
+    // Schema information endpoint
+    app.get('/api/schema', async (req, res) => {
+      try {
+        if (!this.isInitialized) {
+          return res.status(503).json({
+            success: false,
+            error: 'Service not ready'
+          });
+        }
+
+        const schema = await this.db.getSchemaText();
+        
+        res.json({
+          success: true,
+          data: schema,
+          timestamp: new Date().toISOString()
+        });
+
+      } catch (error) {
+        console.error('Schema retrieval error:', error);
+        res.status(500).json({
+          success: false,
+          error: 'Failed to retrieve schema',
+          message: error.message
+        });
+      }
+    });
+
+    // Metrics endpoint
+    app.get('/api/metrics', (req, res) => {
+      if (!this.isInitialized) {
+        return res.status(503).json({
+          success: false,
+          error: 'Service not ready'
+        });
+      }
+
+      const metrics = this.orchestrator.getMetrics();
+      
+      res.json({
+        success: true,
+        data: metrics,
+        timestamp: new Date().toISOString()
+      });
+    });
+
+    // Direct stage testing endpoints (for development)
+    app.post('/api/test/template', async (req, res) => {
+      try {
+        const { query } = req.body;
+        const result = await this.orchestrator.templateEngine.processQuery(query);
+        res.json(result);
+      } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+      }
+    });
+
+    app.post('/api/test/text2cypher', async (req, res) => {
+      try {
+        const { query } = req.body;
+        const result = await this.orchestrator.text2cypherService.generateCypher(query);
+        res.json(result);
+      } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+      }
+    });
+
+    app.post('/api/test/langchain', async (req, res) => {
+      try {
+        const { query, options = {} } = req.body;
+        const result = await this.orchestrator.langchainGraphRAG.queryGraph(query, options);
+        res.json(result);
+      } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+      }
+    });
+
+    // Batch query endpoint
+    app.post('/api/query/batch', async (req, res) => {
+      try {
+        const { queries, options = {} } = req.body;
+
+        if (!Array.isArray(queries) || queries.length === 0) {
+          return res.status(400).json({
+            success: false,
+            error: 'Queries array is required'
+          });
+        }
+
+        if (queries.length > 10) {
+          return res.status(400).json({
+            success: false,
+            error: 'Maximum 10 queries allowed per batch'
+          });
+        }
+
+        const results = await Promise.allSettled(
+          queries.map(query => this.orchestrator.processQuery(query, options))
+        );
+
+        const processedResults = results.map((result, index) => ({
+          queryIndex: index,
+          originalQuery: queries[index],
+          success: result.status === 'fulfilled' && result.value.success,
+          data: result.status === 'fulfilled' ? result.value : null,
+          error: result.status === 'rejected' ? result.reason.message : 
+                (result.value && !result.value.success ? result.value.error : null)
+        }));
+
+        res.json({
+          success: true,
+          data: processedResults,
+          summary: {
+            total: queries.length,
+            successful: processedResults.filter(r => r.success).length,
+            failed: processedResults.filter(r => !r.success).length
+          },
+          timestamp: new Date().toISOString()
+        });
+
+      } catch (error) {
+        console.error('Batch query processing error:', error);
+        res.status(500).json({
+          success: false,
+          error: 'Batch query processing failed',
+          message: error.message
+        });
+      }
+    });
+  }
+
+  async start(port = process.env.PORT || 3000) {
+    await this.initialize();
+    this.setupRoutes();
+
+    app.listen(port, () => {
+      console.log(`GraphRAG server running on port ${port}`);
+      console.log(`Health check: http://localhost:${port}/health`);
+      console.log(`API documentation: http://localhost:${port}/api`);
+    });
+
+    // Graceful shutdown
+    process.on('SIGINT', async () => {
+      console.log('Shutting down gracefully...');
+      await this.db.close();
+      process.exit(0);
+    });
+  }
+}
+
+// Start the server
+if (require.main === module) {
+  const server = new GraphRAGServer();
+  server.start().catch(console.error);
+}
+
+module.exports = { GraphRAGServer, app };
+```
+
+### 5.2 Environment Configuration
+
+**.env.example**
+```bash
+# Database Configuration
+NEO4J_URI=bolt://localhost:7687
+NEO4J_USERNAME=neo4j
+NEO4J_PASSWORD=password
+
+# LLM API Keys
+OPENAI_API_KEY=your_openai_api_key_here
+HUGGINGFACE_API_KEY=your_huggingface_api_key_here
+
+# Model Configuration
+OPENAI_MODEL=gpt-4
+TEXT2CYPHER_MODEL=neo4j/text2cypher-gemma-2-9b-it-finetuned-2024v1
+
+# Server Configuration
+PORT=3000
+NODE_ENV=development
+
+# Rate Limiting
+RATE_LIMIT_WINDOW_MS=900000
+RATE_LIMIT_MAX_REQUESTS=100
+```
+
+### 5.3 Testing and Validation
+
+**tests/integration.test.js**
+```javascript
+const request = require('supertest');
+const { app, GraphRAGServer } = require('../app');
+
+describe('GraphRAG API Integration Tests', () => {
+  let server;
+
+  beforeAll(async () => {
+    server = new GraphRAGServer();
+    await server.initialize();
+    server.setupRoutes();
+  });
+
+  afterAll(async () => {
+    if (server && server.db) {
+      await server.db.close();
+    }
+  });
+
+  describe('Health Check', () => {
+    it('should return healthy status', async () => {
+      const response = await request(app)
+        .get('/health')
+        .expect(200);
+
+      expect(response.body.status).toBe('healthy');
+      expect(response.body.initialized).toBe(true);
+    });
+  });
+
+  describe('Query Processing', () => {
+    it('should process a simple recipe query', async () => {
+      const response = await request(app)
+        .post('/api/query')
+        .send({
+          query: 'What are the ingredients for chocolate cake?',
+          options: { domain: 'recipe' }
+        })
+        .expect(200);
+
+      expect(response.body.success).toBe(true);
+      expect(response.body.data).toHaveProperty('queryId');
+      expect(response.body.data).toHaveProperty('stage');
+      expect(response.body.metadata).toHaveProperty('timestamp');
+    });
+
+    it('should handle invalid queries gracefully', async () => {
+      const response = await request(app)
+        .post('/api/query')
+        .send({
+          query: ''
+        })
+        .expect(400);
+
+      expect(response.body.success).toBe(false);
+      expect(response.body.error).toContain('required');
+    });
+
+    it('should process batch queries', async () => {
+      const response = await request(app)
+        .post('/api/query/batch')
+        .send({
+          queries: [
+            'What ingredients does chocolate cake need?',
+            'Show me pasta recipes'
+          ]
+        })
+        .expect(200);
+
+      expect(response.body.success).toBe(true);
+      expect(response.body.data).toHaveLength(2);
+      expect(response.body.summary.total).toBe(2);
+    });
+  });
+
+  describe('Schema Endpoint', () => {
+    it('should return database schema', async () => {
+      const response = await request(app)
+        .get('/api/schema')
+        .expect(200);
+
+      expect(response.body.success).toBe(true);
+      expect(response.body.data).toHaveProperty('nodeLabels');
+      expect(response.body.data).toHaveProperty('relationshipTypes');
+      expect(response.body.data).toHaveProperty('schemaText');
+    });
+  });
+
+  describe('Metrics Endpoint', () => {
+    it('should return processing metrics', async () => {
+      const response = await request(app)
+        .get('/api/metrics')
+        .expect(200);
+
+      expect(response.body.success).toBe(true);
+      expect(response.body.data).toHaveProperty('totalQueries');
+      expect(response.body.data).toHaveProperty('successByStage');
+      expect(response.body.data).toHaveProperty('successRate');
+    });
+  });
+});
+```
+
+## Implementation Steps and Timeline
+
+### Week 1-2: Foundation Setup
+1. Set up Node.js project with all dependencies
+2. Configure Neo4j connection and basic schema reading
+3. Implement Stage 1 (Template-based queries)
+4. Create basic Express API endpoints
+5. Test with simple recipe queries
+
+### Week 3-4: NLP Enhancement
+1. Implement Stage 2 (NLP-enhanced processing)
+2. Add intent classification and entity extraction
+3. Create query routing logic
+4. Test with more complex query patterns
+5. Add query caching and performance monitoring
+
+### Week 5-6: LLM Integration
+1. Integrate Neo4j Text2Cypher model via Hugging Face API
+2. Implement Stage 3 (Text2Cypher processing)
+3. Add query validation and safety measures
+4. Test with technical documentation queries
+5. Optimize performance and error handling
+
+### Week 7-8: LangChain GraphRAG
+1. Implement Stage 4 (LangChain GraphCypherQAChain)
+2. Create master orchestrator for progressive enhancement
+3. Add parallel processing capabilities
+4. Implement comprehensive error handling and suggestions
+5. Test with complex multi-hop queries
+
+### Week 9-10: Production Readiness
+1. Add batch processing capabilities
+2. Implement comprehensive metrics and monitoring
+3. Create testing suite and documentation
+4. Performance optimization and security hardening
+5. Deployment preparation and scaling considerations
+
+This progressive implementation strategy ensures you start with working functionality quickly while building toward sophisticated LLM-powered capabilities. Each stage provides value independently while preparing for the next level of complexity.

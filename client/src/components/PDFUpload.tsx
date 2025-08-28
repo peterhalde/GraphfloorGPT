@@ -60,7 +60,13 @@ export default function PDFUpload() {
         title: "Document deleted",
         description: "Document and related data removed successfully",
       });
+      // Invalidate all relevant queries to update UI
       queryClient.invalidateQueries({ queryKey: ["/api/documents"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/nodes/pending"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/nodes/approved"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/relations/approved"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/graph/stats"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/graph/preview"] });
     },
     onError: (error) => {
       toast({

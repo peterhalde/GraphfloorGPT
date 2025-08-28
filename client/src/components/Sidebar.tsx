@@ -13,7 +13,7 @@ export default function Sidebar({ activeTab, onTabChange }: SidebarProps) {
   const navItems = [
     { id: "upload", icon: "fas fa-upload", label: "PDF Upload" },
     { id: "nodes", icon: "fas fa-sitemap", label: "Node Management" },
-    { id: "dedup", icon: "fas fa-compress-arrows-alt", label: "Deduplication" },
+    { id: "dedup", icon: "fas fa-compress-arrows-alt", label: "Dedup & Preview" },
     { id: "graph", icon: "fas fa-project-diagram", label: "Graph View" },
     { id: "chat", icon: "fas fa-comments", label: "Query Chat" },
     { id: "dev", icon: "fas fa-code", label: "Developer Console" },

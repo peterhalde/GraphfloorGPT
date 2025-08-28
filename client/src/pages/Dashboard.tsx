@@ -2,13 +2,17 @@ import { useState } from "react";
 import Layout from "@/components/Layout";
 import PDFUpload from "@/components/PDFUpload";
 import NodeManager from "@/components/NodeManager";
-import Deduplication from "@/components/Deduplication";
+import DeduplicationSequential from "@/components/DeduplicationSequential";
 import GraphVisualization from "@/components/GraphVisualization";
+import Neo4jVisualization from "@/components/Neo4jVisualization";
 import ChatInterface from "@/components/ChatInterface";
 import DeveloperConsole from "@/components/DeveloperConsole";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
 
 export default function Dashboard() {
   const [activeTab, setActiveTab] = useState("upload");
+  const [graphViewType, setGraphViewType] = useState<"standard" | "neo4j">("standard");
 
   const renderActiveTab = () => {
     switch (activeTab) {
@@ -17,9 +21,41 @@ export default function Dashboard() {
       case "nodes":
         return <NodeManager />;
       case "dedup":
-        return <Deduplication />;
+        return <DeduplicationSequential />;
       case "graph":
-        return <GraphVisualization />;
+        return (
+          <div>
+            {/* View Type Selector */}
+            <Card className="mb-4 p-3">
+              <div className="flex items-center justify-between">
+                <div className="text-sm text-gray-600">
+                  Select visualization style:
+                </div>
+                <div className="flex space-x-2">
+                  <Button
+                    size="sm"
+                    variant={graphViewType === "standard" ? "default" : "outline"}
+                    onClick={() => setGraphViewType("standard")}
+                  >
+                    <i className="fas fa-project-diagram mr-2"></i>
+                    Standard View
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant={graphViewType === "neo4j" ? "default" : "outline"}
+                    onClick={() => setGraphViewType("neo4j")}
+                    className={graphViewType === "neo4j" ? "bg-green-600 hover:bg-green-700" : ""}
+                  >
+                    <i className="fas fa-database mr-2"></i>
+                    Neo4j Style
+                  </Button>
+                </div>
+              </div>
+            </Card>
+            {/* Render selected visualization */}
+            {graphViewType === "standard" ? <GraphVisualization /> : <Neo4jVisualization />}
+          </div>
+        );
       case "chat":
         return <ChatInterface />;
       case "dev":
@@ -40,8 +76,8 @@ export default function Dashboard() {
         subtitle: "Review and approve suggested nodes and relations from your documents"
       },
       dedup: {
-        title: "Deduplication Engine",
-        subtitle: "Identify and merge similar nodes and relations to maintain graph integrity"
+        title: "Deduplication & Graph Preview",
+        subtitle: "Identify duplicates and preview nodes before adding to the graph"
       },
       graph: {
         title: "Knowledge Graph Visualization",

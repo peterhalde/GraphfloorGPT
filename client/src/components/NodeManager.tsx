@@ -20,7 +20,13 @@ export default function NodeManager() {
     queryKey: ["/api/nodes/approved"],
   });
   
+  const { data: approvedRelationsResponse } = useQuery({
+    queryKey: ["/api/relations/approved"],
+  });
+  
   const approvedNodes = approvedNodesResponse?.nodes || [];
+  const approvedRelations = approvedRelationsResponse?.relations || [];
+  const approvedItems = [...approvedNodes, ...approvedRelations];
 
   const updateNodeStatusMutation = useMutation({
     mutationFn: async ({ id, status }: { id: string; status: string }) => {
@@ -29,7 +35,9 @@ export default function NodeManager() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/nodes/pending"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/nodes/approved"] });
       queryClient.invalidateQueries({ queryKey: ["/api/graph/stats"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/graph/preview"] });
       toast({
         title: "Node updated",
         description: "Node status has been updated successfully",
@@ -51,7 +59,9 @@ export default function NodeManager() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/nodes/pending"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/relations/approved"] });
       queryClient.invalidateQueries({ queryKey: ["/api/graph/stats"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/graph/preview"] });
       toast({
         title: "Relation updated",
         description: "Relation status has been updated successfully",
@@ -73,7 +83,9 @@ export default function NodeManager() {
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["/api/nodes/pending"] });
       queryClient.invalidateQueries({ queryKey: ["/api/nodes/approved"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/relations/approved"] });
       queryClient.invalidateQueries({ queryKey: ["/api/graph/stats"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/graph/preview"] });
       toast({
         title: "Success",
         description: `Approved ${data.approvedNodes} nodes and ${data.approvedRelations} relations.`,
@@ -96,6 +108,7 @@ export default function NodeManager() {
       queryClient.invalidateQueries({ queryKey: ["/api/nodes/pending"] });
       queryClient.invalidateQueries({ queryKey: ["/api/nodes/approved"] });
       queryClient.invalidateQueries({ queryKey: ["/api/graph/stats"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/graph/preview"] });
       toast({
         title: "Success",
         description: "Node and all its relations deleted successfully.",
@@ -118,6 +131,8 @@ export default function NodeManager() {
       queryClient.invalidateQueries({ queryKey: ["/api/nodes/pending"] });
       queryClient.invalidateQueries({ queryKey: ["/api/nodes/approved"] });
       queryClient.invalidateQueries({ queryKey: ["/api/graph/stats"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/graph/preview"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/relations/approved"] });
       toast({
         title: "Success",
         description: "Relation deleted successfully.",
@@ -138,33 +153,34 @@ export default function NodeManager() {
 
   return (
     <div className="max-w-6xl mx-auto">
-      <div className="flex justify-between items-center mb-6">
-        <div>
-          <h3 className="text-lg font-medium text-gray-900">Node & Relation Management</h3>
-          <p className="text-carbon-gray-60">Review and approve suggested nodes and relations from your documents</p>
-        </div>
-        <div className="flex space-x-3">
-          <Button
-            onClick={() => approveAllMutation.mutate()}
-            disabled={approveAllMutation.isPending || pendingItems.length === 0}
-            className="bg-green-600 hover:bg-green-700 text-white"
-          >
-            <CheckCircle className="w-4 h-4 mr-2" />
-            Approve All ({pendingItems.length})
-          </Button>
-          <Button variant="outline">
-            <i className="fas fa-filter mr-2"></i>
-            Filter
-          </Button>
-          <Button>
-            <i className="fas fa-plus mr-2"></i>
-            Add Manual Node
-          </Button>
-        </div>
-      </div>
+      <div className="space-y-6">
+          <div className="flex justify-between items-center">
+            <div>
+              <h3 className="text-lg font-medium text-gray-900">Node & Relation Management</h3>
+              <p className="text-carbon-gray-60">Review and approve suggested nodes and relations from your documents</p>
+            </div>
+            <div className="flex space-x-3">
+              <Button
+                onClick={() => approveAllMutation.mutate()}
+                disabled={approveAllMutation.isPending || pendingItems.length === 0}
+                className="bg-green-600 hover:bg-green-700 text-white"
+              >
+                <CheckCircle className="w-4 h-4 mr-2" />
+                Approve All ({pendingItems.length})
+              </Button>
+              <Button variant="outline">
+                <i className="fas fa-filter mr-2"></i>
+                Filter
+              </Button>
+              <Button>
+                <i className="fas fa-plus mr-2"></i>
+                Add Manual Node
+              </Button>
+            </div>
+          </div>
 
-      {/* Pending Approval Section */}
-      <Card className="mb-6">
+          {/* Pending Approval Section */}
+          <Card className="mb-6">
         <div className="border-b border-carbon-gray-20 p-4">
           <h4 className="font-medium text-gray-900 flex items-center">
             <i className="fas fa-clock text-carbon-yellow mr-2"></i>
@@ -245,6 +261,7 @@ export default function NodeManager() {
                         }}
                         disabled={deleteNodeMutation.isPending || deleteRelationMutation.isPending}
                         className="text-red-600 border-red-600 hover:bg-red-50"
+                        title="Permanently delete this item"
                       >
                         <Trash2 className="w-4 h-4 mr-1" />
                         Delete
@@ -258,43 +275,90 @@ export default function NodeManager() {
         </CardContent>
       </Card>
 
-      {/* Approved Nodes Section */}
+      {/* Approved Nodes & Relations Section */}
       <Card>
         <div className="border-b border-carbon-gray-20 p-4">
-          <h4 className="font-medium text-gray-900 flex items-center">
-            <i className="fas fa-check-circle text-carbon-green mr-2"></i>
-            Approved Nodes & Relations ({approvedNodes.length})
-          </h4>
+          <div className="flex items-center justify-between">
+            <h4 className="font-medium text-gray-900 flex items-center">
+              <i className="fas fa-check-circle text-carbon-green mr-2"></i>
+              Approved Nodes & Relations ({approvedItems.length})
+            </h4>
+            {approvedItems.length > 0 && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={async () => {
+                  try {
+                    const response = await apiRequest("POST", "/api/nodes/undo-all", {});
+                    const result = await response.json();
+                    if (result.success) {
+                      queryClient.invalidateQueries({ queryKey: ["/api/nodes/approved"] });
+                      queryClient.invalidateQueries({ queryKey: ["/api/nodes/pending"] });
+                      queryClient.invalidateQueries({ queryKey: ["/api/relations/approved"] });
+                      queryClient.invalidateQueries({ queryKey: ["/api/graph/preview"] });
+                      queryClient.invalidateQueries({ queryKey: ["/api/duplicates/candidates"] });
+                      toast({
+                        title: "Success",
+                        description: `Reset ${result.resetNodes} nodes and ${result.resetRelations} relations`,
+                      });
+                    }
+                  } catch (error) {
+                    toast({
+                      title: "Error",
+                      description: "Failed to undo all approvals",
+                      variant: "destructive",
+                    });
+                  }
+                }}
+                disabled={updateNodeStatusMutation.isPending || updateRelationStatusMutation.isPending}
+                className="text-orange-600 border-orange-600 hover:bg-orange-50"
+              >
+                <i className="fas fa-undo mr-2"></i>
+                Undo All Approvals
+              </Button>
+            )}
+          </div>
         </div>
         <CardContent className="p-4">
-          {approvedNodes.length === 0 ? (
+          {approvedItems.length === 0 ? (
             <div className="text-center py-8 text-carbon-gray-60">
-              <p>No approved nodes yet</p>
+              <p>No approved nodes or relations yet</p>
             </div>
           ) : (
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              {approvedNodes.slice(0, approvedNodesLimit).map((node: any) => (
-                <div key={node.id} className="border border-carbon-gray-20 rounded-lg p-3">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <Badge className="bg-blue-100 text-blue-800 mb-1">
-                        Node
+              {approvedItems.slice(0, approvedNodesLimit).map((item: any) => (
+                <div key={item.id} className="border border-carbon-gray-20 rounded-lg p-3">
+                  <div className="flex items-start justify-between">
+                    <div className="flex-1">
+                      <Badge className={item.relationshipType ? "bg-green-100 text-green-800 mb-1" : "bg-blue-100 text-blue-800 mb-1"}>
+                        {item.relationshipType ? "Relation" : "Node"}
                       </Badge>
-                      <h6 className="font-medium text-gray-900">{node.name}</h6>
-                      <p className="text-xs text-carbon-gray-60 mt-1">{node.description}</p>
+                      <h6 className="font-medium text-gray-900">
+                        {item.relationshipType 
+                          ? `${item.fromNodeName || 'Unknown'} → ${item.toNodeName || 'Unknown'}`
+                          : item.name}
+                      </h6>
+                      {item.relationshipType && (
+                        <span className="text-xs text-blue-600 font-medium">{item.relationshipType}</span>
+                      )}
+                      <p className="text-xs text-carbon-gray-60 mt-1">{item.description}</p>
                     </div>
-                    <div className="flex space-x-2">
-                      <Button variant="ghost" size="sm">
-                        <i className="fas fa-external-link-alt"></i>
-                      </Button>
+                    <div className="flex space-x-2 ml-2">
                       <Button 
                         size="sm" 
                         variant="outline"
-                        onClick={() => deleteNodeMutation.mutate(node.id)}
-                        disabled={deleteNodeMutation.isPending}
-                        className="text-red-600 border-red-600 hover:bg-red-50"
+                        onClick={() => {
+                          const mutation = item.relationshipType 
+                            ? updateRelationStatusMutation 
+                            : updateNodeStatusMutation;
+                          mutation.mutate({ id: item.id, status: "pending" });
+                        }}
+                        disabled={updateNodeStatusMutation.isPending || updateRelationStatusMutation.isPending}
+                        className="text-orange-600 border-orange-600 hover:bg-orange-50"
+                        title="Move back to pending approval"
                       >
-                        <Trash2 className="w-4 h-4" />
+                        <i className="fas fa-undo mr-1"></i>
+                        Undo
                       </Button>
                     </div>
                   </div>
@@ -303,19 +367,20 @@ export default function NodeManager() {
             </div>
           )}
           
-          {approvedNodes.length > approvedNodesLimit && (
+          {approvedItems.length > approvedNodesLimit && (
             <div className="mt-4 text-center">
               <Button 
                 variant="link" 
                 className="text-carbon-blue hover:text-blue-700"
                 onClick={() => setApprovedNodesLimit(prev => prev + 10)}
               >
-                Load more nodes and relations ({approvedNodes.length - approvedNodesLimit} remaining)
+                Load more items ({approvedItems.length - approvedNodesLimit} remaining)
               </Button>
             </div>
           )}
         </CardContent>
       </Card>
+      </div>
     </div>
   );
 }

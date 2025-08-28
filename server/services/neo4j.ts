@@ -20,25 +20,33 @@ export class Neo4jService {
     name: string;
     description?: string;
     type: string;
+    category?: string;
     properties?: any;
   }): Promise<void> {
     const session = this.driver.session();
     try {
       // Create a safe node type label (remove spaces and special chars)
-      const safeType = node.type.replace(/[^a-zA-Z0-9_]/g, '_') || 'Entity';
+      let safeType = node.type.replace(/[^a-zA-Z0-9_]/g, '_') || 'Entity';
+      
+      // Ensure label doesn't start with a number (Neo4j requirement)
+      if (/^\d/.test(safeType)) {
+        safeType = 'node_' + safeType;
+      }
       
       await session.run(
         `CREATE (n:${safeType} {
           id: $id,
           name: $name,
           description: $description,
-          type: $type
+          type: $type,
+          category: $category
         })`,
         {
           id: node.id,
           name: node.name,
           description: node.description || "",
-          type: node.type
+          type: node.type,
+          category: node.category || node.type
         }
       );
     } finally {
@@ -107,7 +115,7 @@ export class Neo4jService {
   }
 
   async getGraphVisualizationData(): Promise<{
-    nodes: Array<{ id: string; name: string; type: string; group: number }>;
+    nodes: Array<{ id: string; name: string; type: string; category?: string; group: number }>;
     links: Array<{ source: string; target: string; type: string }>;
   }> {
     const session = this.driver.session();
@@ -115,7 +123,9 @@ export class Neo4jService {
       const result = await session.run(`
         MATCH (n)-[r]->(m)
         RETURN n.id as sourceId, n.name as sourceName, labels(n)[0] as sourceType,
+               n.category as sourceCategory, n.type as sourceOriginalType,
                m.id as targetId, m.name as targetName, labels(m)[0] as targetType,
+               m.category as targetCategory, m.type as targetOriginalType,
                type(r) as relationType
         LIMIT 1000
       `);
@@ -127,22 +137,28 @@ export class Neo4jService {
         const sourceId = record.get("sourceId");
         const sourceName = record.get("sourceName");
         const sourceType = record.get("sourceType");
+        const sourceCategory = record.get("sourceCategory");
+        const sourceOriginalType = record.get("sourceOriginalType");
         const targetId = record.get("targetId");
         const targetName = record.get("targetName");
         const targetType = record.get("targetType");
+        const targetCategory = record.get("targetCategory");
+        const targetOriginalType = record.get("targetOriginalType");
         const relationType = record.get("relationType");
 
-        // Add nodes to map
+        // Add nodes to map - use category for coloring if available
         nodeMap.set(sourceId, {
           id: sourceId,
           name: sourceName,
-          type: sourceType,
+          type: sourceCategory || sourceOriginalType || sourceType,  // Use category for color mapping
+          category: sourceCategory,
           group: this.getNodeGroup(sourceType)
         });
         nodeMap.set(targetId, {
           id: targetId,
           name: targetName,
-          type: targetType,
+          type: targetCategory || targetOriginalType || targetType,  // Use category for color mapping
+          category: targetCategory,
           group: this.getNodeGroup(targetType)
         });
 

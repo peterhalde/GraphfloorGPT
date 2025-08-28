@@ -7,6 +7,7 @@ import {
   queryTranslations,
   chatSessions,
   chatMessages,
+  categories,
   type User,
   type InsertUser,
   type Document,
@@ -23,15 +24,25 @@ import {
   type InsertChatSession,
   type ChatMessage,
   type InsertChatMessage,
+  type Category,
+  type InsertCategory,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, and, or, like, gte, lte, inArray, sql } from "drizzle-orm";
+
 
 export interface IStorage {
   // Users
   getUser(id: string): Promise<User | undefined>;
   getUserByUsername(username: string): Promise<User | undefined>;
   createUser(user: InsertUser): Promise<User>;
+
+  // Categories
+  getCategories(): Promise<Category[]>;
+  createCategory(category: { name: string; color: string; description?: string }): Promise<Category>;
+  updateCategory(id: string, updates: Partial<Category>): Promise<Category>;
+  deleteCategory(id: string): Promise<void>;
+  updateNodeCategory(nodeId: string, categoryId: string): Promise<GraphNode>;
 
   // Documents
   createDocument(document: InsertDocument): Promise<Document>;
@@ -73,6 +84,10 @@ export interface IStorage {
   getChatSession(id: string): Promise<ChatSession | undefined>;
   createChatMessage(message: InsertChatMessage): Promise<ChatMessage>;
   getChatMessages(sessionId: string): Promise<ChatMessage[]>;
+  
+  // Cascade deletion
+  deleteGraphNodesByDocument(documentId: string): Promise<void>;
+  deleteGraphRelationsByDocument(documentId: string): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -165,16 +180,36 @@ export class DatabaseStorage implements IStorage {
   async updateGraphNodeStatus(id: string, status: string): Promise<void> {
     await db
       .update(graphNodes)
-      .set({ status, approvedAt: status === "approved" ? new Date() : null })
+      .set({ status, approvedAt: status === "approved" ? sql`NOW()` : null })
+      .where(eq(graphNodes.id, id));
+  }
+
+  async resetGraphNodeType(id: string): Promise<void> {
+    // Reset node type to "unknown" when clearing preview
+    await db
+      .update(graphNodes)
+      .set({ type: "unknown" })
       .where(eq(graphNodes.id, id));
   }
 
   async deleteGraphNode(id: string): Promise<void> {
     await db.delete(graphNodes).where(eq(graphNodes.id, id));
   }
-
-  async deleteGraphNode(id: string): Promise<void> {
-    await db.delete(graphNodes).where(eq(graphNodes.id, id));
+  
+  async resetInGraphNodesToApproved(): Promise<number> {
+    const result = await db
+      .update(graphNodes)
+      .set({ status: "approved" })
+      .where(eq(graphNodes.status, "in_graph"));
+    return result.count || 0;
+  }
+  
+  async resetInGraphRelationsToApproved(): Promise<number> {
+    const result = await db
+      .update(graphRelations)
+      .set({ status: "approved" })
+      .where(eq(graphRelations.status, "in_graph"));
+    return result.count || 0;
   }
 
   async getGraphNodesWithRelations(): Promise<GraphNode[]> {
@@ -235,7 +270,7 @@ export class DatabaseStorage implements IStorage {
   async updateGraphRelationStatus(id: string, status: string): Promise<void> {
     await db
       .update(graphRelations)
-      .set({ status, approvedAt: status === "approved" ? new Date() : null })
+      .set({ status, approvedAt: status === "approved" ? sql`NOW()` : null })
       .where(eq(graphRelations.id, id));
   }
 
@@ -259,7 +294,7 @@ export class DatabaseStorage implements IStorage {
   async updateDuplicateCandidateStatus(id: string, status: string): Promise<void> {
     await db
       .update(duplicateCandidates)
-      .set({ status, resolvedAt: new Date() })
+      .set({ status, resolvedAt: sql`NOW()` })
       .where(eq(duplicateCandidates.id, id));
   }
 
@@ -339,6 +374,116 @@ export class DatabaseStorage implements IStorage {
       .from(chatMessages)
       .where(eq(chatMessages.sessionId, sessionId))
       .orderBy(chatMessages.timestamp);
+  }
+
+  // Category management methods
+  async getCategories(): Promise<Category[]> {
+    const dbCategories = await db.select().from(categories);
+    
+    // If no categories exist, return default ones
+    if (dbCategories.length === 0) {
+      const defaultCategories: Category[] = [
+        { id: "unknown", name: "Unknown", color: "#525252", description: "Uncategorized nodes", createdAt: new Date() },
+        { id: "ingredient", name: "Ingredient", color: "#FF6B6B", description: "Food ingredients", createdAt: new Date() },
+        { id: "dish", name: "Dish", color: "#4ECDC4", description: "Prepared dishes", createdAt: new Date() },
+        { id: "recipe", name: "Recipe", color: "#45B7D1", description: "Cooking recipes", createdAt: new Date() },
+        { id: "entity", name: "Entity", color: "#0F62FE", description: "General entities", createdAt: new Date() },
+        { id: "concept", name: "Concept", color: "#24A148", description: "Abstract concepts", createdAt: new Date() },
+        { id: "process", name: "Process", color: "#F1C21B", description: "Processes and methods", createdAt: new Date() },
+      ];
+      
+      // Insert default categories into database
+      for (const cat of defaultCategories) {
+        await db.insert(categories).values(cat).onConflictDoNothing();
+      }
+      
+      return defaultCategories;
+    }
+    
+    return dbCategories;
+  }
+
+  async createCategory(category: { name: string; color: string; description?: string }): Promise<Category> {
+    const newCategory: InsertCategory = {
+      id: crypto.randomUUID(),
+      name: category.name,
+      color: category.color,
+      description: category.description,
+    };
+    
+    const [created] = await db.insert(categories).values(newCategory).returning();
+    return created;
+  }
+
+  async createCategoryWithId(category: { id: string; name: string; color: string; description?: string }): Promise<Category> {
+    const newCategory: InsertCategory = {
+      id: category.id,
+      name: category.name,
+      color: category.color,
+      description: category.description,
+    };
+    
+    // Use onConflictDoNothing to avoid errors if category already exists
+    const result = await db.insert(categories).values(newCategory).onConflictDoNothing().returning();
+    
+    // If category already exists, fetch and return it
+    if (result.length === 0) {
+      const [existing] = await db.select().from(categories).where(eq(categories.id, category.id));
+      return existing;
+    }
+    
+    return result[0];
+  }
+
+  async updateCategory(id: string, updates: Partial<Category>): Promise<Category> {
+    const [updated] = await db
+      .update(categories)
+      .set(updates)
+      .where(eq(categories.id, id))
+      .returning();
+    return updated;
+  }
+
+  async deleteCategory(id: string): Promise<void> {
+    // First move all nodes with this category to "unknown"
+    await db
+      .update(graphNodes)
+      .set({ type: "unknown" })
+      .where(eq(graphNodes.type, id));
+    
+    // Then delete the category
+    await db.delete(categories).where(eq(categories.id, id));
+  }
+
+  async updateNodeCategory(nodeId: string, categoryId: string): Promise<GraphNode> {
+    // First verify the category exists
+    const category = await db
+      .select()
+      .from(categories)
+      .where(eq(categories.id, categoryId))
+      .limit(1);
+    
+    if (category.length === 0) {
+      throw new Error(`Category ${categoryId} not found`);
+    }
+    
+    // Update the node's type field to the category ID (not name)
+    // This ensures consistency with how categories are matched in the graph preview
+    const [updatedNode] = await db
+      .update(graphNodes)
+      .set({ type: categoryId })
+      .where(eq(graphNodes.id, nodeId))
+      .returning();
+    return updatedNode;
+  }
+  
+  // Add methods for cascade deletion
+  async deleteGraphNodesByDocument(documentId: string): Promise<void> {
+    await db.delete(graphNodes).where(eq(graphNodes.documentId, documentId));
+  }
+
+  async deleteGraphRelationsByDocument(documentId: string): Promise<void> {
+    await db.delete(graphRelations).where(eq(graphRelations.documentId, documentId));
   }
 }
 

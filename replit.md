@@ -10,6 +10,8 @@ GraphfloorGPT is a modern web application that transforms PDF documents into int
 - **User Equivalence System**: Added comprehensive user-guided learning for custom node/relation mappings with German cooking terms pre-configured
 - **Robust JSON Parsing**: Fixed Claude Sonnet 4 response parsing to handle markdown formatting and extraction errors
 - **Merge Functionality**: Fixed database operations for properly merging duplicate nodes and updating related connections
+- **GraphRAG Pipeline**: Implemented comprehensive 5-stage progressive query processing (Template → NLP → Claude AI → LangChain → Hybrid)
+- **Chat Interface Improvements**: Added clear chat functionality and real-time query statistics from GraphRAG metrics
 
 ## User Preferences
 
